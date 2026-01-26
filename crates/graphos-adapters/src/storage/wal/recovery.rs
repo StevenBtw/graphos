@@ -3,7 +3,7 @@
 use super::WalRecord;
 use graphos_common::utils::error::{Error, Result, StorageError};
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{BufReader, Read};
 use std::path::Path;
 
 /// Handles WAL recovery after a crash.

@@ -1,7 +1,7 @@
 //! Project operator for selecting and transforming columns.
 
 use super::{Operator, OperatorError, OperatorResult};
-use crate::execution::{DataChunk, ValueVector};
+use crate::execution::DataChunk;
 use graphos_common::types::LogicalType;
 
 /// A projection expression.

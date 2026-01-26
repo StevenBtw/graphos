@@ -10,7 +10,7 @@ pub use ast::*;
 pub use lexer::Lexer;
 pub use parser::Parser;
 
-use graphos_common::utils::error::{QueryError, QueryErrorKind, Result, SourceSpan};
+use graphos_common::utils::error::Result;
 
 /// Parses a GQL query string into an AST.
 ///

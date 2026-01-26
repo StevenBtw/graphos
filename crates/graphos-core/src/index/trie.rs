@@ -7,7 +7,6 @@
 use graphos_common::types::{EdgeId, NodeId};
 use graphos_common::utils::hash::FxHashMap;
 use smallvec::SmallVec;
-use std::sync::Arc;
 
 /// A trie node in the edge trie.
 #[derive(Debug, Clone)]

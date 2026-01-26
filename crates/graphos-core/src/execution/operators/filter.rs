@@ -1,6 +1,6 @@
 //! Filter operator for applying predicates.
 
-use super::{Operator, OperatorError, OperatorResult};
+use super::{Operator, OperatorResult};
 use crate::execution::{DataChunk, SelectionVector};
 use graphos_common::types::Value;
 

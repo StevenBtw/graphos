@@ -32,7 +32,7 @@ impl PyQueryResult {
     }
 
     /// Get a row by index.
-    fn __getitem__(&self, idx: isize, py: Python<'_>) -> PyResult<PyObject> {
+    fn __getitem__(&self, idx: isize, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let idx = if idx < 0 {
             (self.rows.len() as isize + idx) as usize
         } else {
@@ -48,7 +48,7 @@ impl PyQueryResult {
         for (col, val) in self.columns.iter().zip(row.iter()) {
             dict.set_item(col, PyValue::to_py(val, py))?;
         }
-        Ok(dict.into())
+        Ok(dict.unbind().into_any())
     }
 
     /// Iterate over rows.

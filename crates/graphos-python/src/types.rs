@@ -1,7 +1,7 @@
 //! Python type conversions.
 
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+use pyo3::types::{PyDict, PyList};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

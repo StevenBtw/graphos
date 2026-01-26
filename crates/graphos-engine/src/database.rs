@@ -3,7 +3,6 @@
 use crate::config::Config;
 use crate::session::Session;
 use crate::transaction::TransactionManager;
-use graphos_adapters::storage::MemoryBackend;
 use graphos_common::utils::error::Result;
 use graphos_core::graph::lpg::LpgStore;
 use parking_lot::RwLock;

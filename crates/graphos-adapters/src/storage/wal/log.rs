@@ -1,10 +1,10 @@
 //! WAL log file management.
 
 use super::WalRecord;
-use graphos_common::utils::error::{Error, Result, StorageError};
+use graphos_common::utils::error::{Error, Result};
 use parking_lot::Mutex;
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 /// Manages the Write-Ahead Log.

@@ -19,10 +19,10 @@ description = "A pure-Rust, high-performance, embeddable graph database"
 
 [workspace.dependencies]
 # Internal crates
-graphos-common = { path = "crates/graphos-common" }
-graphos-core = { path = "crates/graphos-core" }
-graphos-adapters = { path = "crates/graphos-adapters" }
-graphos-engine = { path = "crates/graphos-engine" }
+graphos-common = { path = "crates/graphos-common", version = "0.1.0" }
+graphos-core = { path = "crates/graphos-core", version = "0.1.0" }
+graphos-adapters = { path = "crates/graphos-adapters", version = "0.1.0" }
+graphos-engine = { path = "crates/graphos-engine", version = "0.1.0" }
 
 # Error handling
 thiserror = "2.0"

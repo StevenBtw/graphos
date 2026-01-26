@@ -36,12 +36,12 @@ impl PyNode {
     }
 
     /// Get all properties as a dictionary.
-    fn properties(&self, py: Python<'_>) -> PyObject {
+    fn properties(&self, py: Python<'_>) -> Py<PyAny> {
         let dict = pyo3::types::PyDict::new(py);
         for (k, v) in &self.properties {
             dict.set_item(k, PyValue::to_py(v, py)).unwrap();
         }
-        dict.into()
+        dict.unbind().into_any()
     }
 
     /// Check if node has a label.
@@ -128,12 +128,12 @@ impl PyEdge {
     }
 
     /// Get all properties as a dictionary.
-    fn properties(&self, py: Python<'_>) -> PyObject {
+    fn properties(&self, py: Python<'_>) -> Py<PyAny> {
         let dict = pyo3::types::PyDict::new(py);
         for (k, v) in &self.properties {
             dict.set_item(k, PyValue::to_py(v, py)).unwrap();
         }
-        dict.into()
+        dict.unbind().into_any()
     }
 
     fn __repr__(&self) -> String {

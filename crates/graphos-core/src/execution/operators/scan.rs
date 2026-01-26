@@ -1,7 +1,7 @@
 //! Scan operator for reading data from storage.
 
-use super::{Operator, OperatorError, OperatorResult};
-use crate::execution::{DataChunk, ValueVector};
+use super::{Operator, OperatorResult};
+use crate::execution::DataChunk;
 use crate::graph::lpg::LpgStore;
 use graphos_common::types::{LogicalType, NodeId};
 use std::sync::Arc;
