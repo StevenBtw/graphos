@@ -87,10 +87,11 @@ impl<'a> Parser<'a> {
         let node = self.parse_node_pattern()?;
 
         // Check for path continuation
-        if matches!(self.current.kind, TokenKind::Arrow | TokenKind::LeftArrow | TokenKind::DoubleDash) {
+        // Handle both `-[...]->`/`<-[...]-` style and `->` style
+        if matches!(self.current.kind, TokenKind::Arrow | TokenKind::LeftArrow | TokenKind::DoubleDash | TokenKind::Minus) {
             let mut edges = Vec::new();
 
-            while matches!(self.current.kind, TokenKind::Arrow | TokenKind::LeftArrow | TokenKind::DoubleDash) {
+            while matches!(self.current.kind, TokenKind::Arrow | TokenKind::LeftArrow | TokenKind::DoubleDash | TokenKind::Minus) {
                 edges.push(self.parse_edge_pattern()?);
             }
 
@@ -143,58 +144,102 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_edge_pattern(&mut self) -> Result<EdgePattern> {
-        let direction = match self.current.kind {
-            TokenKind::Arrow => {
-                self.advance();
-                EdgeDirection::Outgoing
-            }
-            TokenKind::LeftArrow => {
-                self.advance();
-                EdgeDirection::Incoming
-            }
-            TokenKind::DoubleDash => {
-                self.advance();
-                EdgeDirection::Undirected
-            }
-            _ => return Err(self.error("Expected edge direction")),
-        };
+        // Handle both styles:
+        // 1. `-[...]->` or `-[:TYPE]->` (direction determined by trailing arrow)
+        // 2. `->` or `<-` or `--` (direction determined by leading arrow)
 
-        // Parse optional [variable:TYPE]
-        let (variable, types) = if self.current.kind == TokenKind::LBracket {
+        let (variable, types, direction) = if self.current.kind == TokenKind::Minus {
+            // Pattern: -[...]->(target) or -[...]-(target)
             self.advance();
 
-            let var = if self.current.kind == TokenKind::Identifier && self.peek_kind() != TokenKind::Colon {
-                let name = self.current.text.clone();
+            // Parse [variable:TYPE]
+            let (var, edge_types) = if self.current.kind == TokenKind::LBracket {
                 self.advance();
-                Some(name)
+
+                let v = if self.current.kind == TokenKind::Identifier && self.peek_kind() != TokenKind::Colon {
+                    let name = self.current.text.clone();
+                    self.advance();
+                    Some(name)
+                } else {
+                    None
+                };
+
+                let mut tps = Vec::new();
+                while self.current.kind == TokenKind::Colon {
+                    self.advance();
+                    if self.current.kind != TokenKind::Identifier {
+                        return Err(self.error("Expected edge type"));
+                    }
+                    tps.push(self.current.text.clone());
+                    self.advance();
+                }
+
+                self.expect(TokenKind::RBracket)?;
+                (v, tps)
             } else {
-                None
+                (None, Vec::new())
             };
 
-            let mut types = Vec::new();
-            while self.current.kind == TokenKind::Colon {
+            // Now determine direction from trailing symbol
+            let dir = if self.current.kind == TokenKind::Arrow {
                 self.advance();
-                if self.current.kind != TokenKind::Identifier {
-                    return Err(self.error("Expected edge type"));
+                EdgeDirection::Outgoing
+            } else if self.current.kind == TokenKind::Minus {
+                self.advance();
+                EdgeDirection::Undirected
+            } else {
+                return Err(self.error("Expected -> or - after edge pattern"));
+            };
+
+            (var, edge_types, dir)
+        } else if self.current.kind == TokenKind::LeftArrow {
+            // Pattern: <-[...]-(target)
+            self.advance();
+
+            let (var, edge_types) = if self.current.kind == TokenKind::LBracket {
+                self.advance();
+
+                let v = if self.current.kind == TokenKind::Identifier && self.peek_kind() != TokenKind::Colon {
+                    let name = self.current.text.clone();
+                    self.advance();
+                    Some(name)
+                } else {
+                    None
+                };
+
+                let mut tps = Vec::new();
+                while self.current.kind == TokenKind::Colon {
+                    self.advance();
+                    if self.current.kind != TokenKind::Identifier {
+                        return Err(self.error("Expected edge type"));
+                    }
+                    tps.push(self.current.text.clone());
+                    self.advance();
                 }
-                types.push(self.current.text.clone());
+
+                self.expect(TokenKind::RBracket)?;
+                (v, tps)
+            } else {
+                (None, Vec::new())
+            };
+
+            // Consume trailing -
+            if self.current.kind == TokenKind::Minus {
                 self.advance();
             }
 
-            self.expect(TokenKind::RBracket)?;
-            (var, types)
-        } else {
-            (None, Vec::new())
-        };
-
-        // Parse direction continuation for outgoing
-        if direction == EdgeDirection::Outgoing {
-            // Already consumed ->
+            (var, edge_types, EdgeDirection::Incoming)
         } else if self.current.kind == TokenKind::Arrow {
+            // Simple ->
             self.advance();
+            (None, Vec::new(), EdgeDirection::Outgoing)
         } else if self.current.kind == TokenKind::DoubleDash {
+            // Simple --
             self.advance();
-        }
+            (None, Vec::new(), EdgeDirection::Undirected)
+        } else {
+            return Err(self.error("Expected edge pattern"));
+        };
 
         let target = self.parse_node_pattern()?;
 

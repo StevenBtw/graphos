@@ -22,4 +22,6 @@ target
 
 # Local environment files
 .env
-crates/graphos-common/benches/arena_bench.rs
+
+# Claude settings
+.claude/*

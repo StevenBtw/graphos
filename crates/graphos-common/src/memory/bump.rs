@@ -224,11 +224,13 @@ mod tests {
             scope.alloc(2u64);
             scope.alloc(3u64);
 
-            assert!(scope.scope_allocated_bytes() >= 16); // At least 2 u64s
+            // Note: bumpalo's allocated_bytes() tracks chunk-level memory, not individual
+            // allocations. It may not increase for small allocations that fit in existing chunks.
+            // We verify functionality through allocation_count instead.
         }
 
-        // Parent bump should still have all allocations
-        assert!(bump.allocation_count() >= outer_allocs);
+        // Parent bump should have all allocations (outer + 2 from scope)
+        assert_eq!(bump.allocation_count(), outer_allocs + 2);
     }
 
     #[test]

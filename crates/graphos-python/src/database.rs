@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use graphos_common::types::{EdgeId, NodeId, Value};
-use graphos_engine::config::GraphosConfig;
+use graphos_common::types::{EdgeId, NodeId};
+use graphos_engine::config::Config;
 use graphos_engine::database::GraphosDB;
 
-use crate::error::{PyGraphosError, PyGraphosResult};
+use crate::error::PyGraphosError;
 use crate::graph::{PyEdge, PyNode};
 use crate::query::{PyQueryBuilder, PyQueryResult};
 use crate::types::PyValue;
@@ -28,9 +28,9 @@ impl PyGraphosDB {
     #[pyo3(signature = (path=None))]
     fn new(path: Option<String>) -> PyResult<Self> {
         let config = if let Some(p) = path {
-            GraphosConfig::default().with_data_dir(p.into())
+            Config::persistent(p)
         } else {
-            GraphosConfig::default()
+            Config::in_memory()
         };
 
         let db = GraphosDB::with_config(config);
@@ -43,7 +43,7 @@ impl PyGraphosDB {
     /// Open an existing database.
     #[staticmethod]
     fn open(path: String) -> PyResult<Self> {
-        let config = GraphosConfig::default().with_data_dir(path.into());
+        let config = Config::persistent(path);
         let db = GraphosDB::with_config(config);
 
         Ok(Self {
@@ -57,7 +57,7 @@ impl PyGraphosDB {
         &self,
         query: &str,
         params: Option<&Bound<'_, pyo3::types::PyDict>>,
-        py: Python<'_>,
+        _py: Python<'_>,
     ) -> PyResult<PyQueryResult> {
         let _params = if let Some(p) = params {
             let mut map = HashMap::new();
@@ -72,8 +72,6 @@ impl PyGraphosDB {
         };
 
         // TODO: Actually execute the query when engine is implemented
-        // For now, return a placeholder result
-        let _ = py;
         let _ = query;
 
         Ok(PyQueryResult::empty())
@@ -81,7 +79,7 @@ impl PyGraphosDB {
 
     /// Execute a query and return a query builder.
     fn query(&self, query: String) -> PyQueryBuilder {
-        PyQueryBuilder::new(query)
+        PyQueryBuilder::create(query)
     }
 
     /// Create a node.

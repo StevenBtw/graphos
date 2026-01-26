@@ -159,23 +159,28 @@ impl PyValue {
     }
 
     /// Convert Value to Python object.
-    pub fn to_py(value: &Value, py: Python<'_>) -> PyObject {
+    pub fn to_py(value: &Value, py: Python<'_>) -> Py<PyAny> {
+        use pyo3::conversion::IntoPyObjectExt;
+
         match value {
             Value::Null => py.None(),
-            Value::Bool(v) => v.to_object(py),
-            Value::Int64(v) => v.to_object(py),
-            Value::Float64(v) => v.to_object(py),
-            Value::String(v) => v.as_ref().to_object(py),
+            Value::Bool(v) => (*v).into_py_any(py).unwrap(),
+            Value::Int64(v) => (*v).into_py_any(py).unwrap(),
+            Value::Float64(v) => (*v).into_py_any(py).unwrap(),
+            Value::String(v) => {
+                let s: &str = v.as_ref();
+                s.into_py_any(py).unwrap()
+            }
             Value::List(items) => {
-                let py_items: Vec<PyObject> = items.iter().map(|v| Self::to_py(v, py)).collect();
-                PyList::new(py, py_items).unwrap().into()
+                let py_items: Vec<Py<PyAny>> = items.iter().map(|v| Self::to_py(v, py)).collect();
+                PyList::new(py, py_items).unwrap().unbind().into_any()
             }
             Value::Map(map) => {
                 let dict = PyDict::new(py);
                 for (k, v) in map.as_ref() {
                     dict.set_item(k.as_str(), Self::to_py(v, py)).unwrap();
                 }
-                dict.into()
+                dict.unbind().into_any()
             }
             // Handle other types as needed
             _ => py.None(),

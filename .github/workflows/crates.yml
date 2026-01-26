@@ -1,0 +1,32 @@
+name: Crates.io
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Publish graphos-common
+        run: cargo publish -p graphos-common --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish graphos-core
+        run: cargo publish -p graphos-core --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish graphos-adapters
+        run: cargo publish -p graphos-adapters --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Publish graphos-engine
+        run: cargo publish -p graphos-engine --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

@@ -219,7 +219,8 @@ mod tests {
         assert_eq!(pool.available(), 10);
 
         // Getting objects should reduce available count
-        let _ = pool.get();
+        // Note: we must keep the Pooled handle alive, otherwise it returns the object on drop
+        let _obj = pool.get();
         assert_eq!(pool.available(), 9);
     }
 

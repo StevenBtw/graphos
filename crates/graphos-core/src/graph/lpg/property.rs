@@ -198,16 +198,16 @@ mod tests {
         storage.set(node2, name_key.clone(), "Bob".into());
 
         assert_eq!(
-            storage.get(node1, &name_key).and_then(|v| v.as_str()),
-            Some("Alice")
+            storage.get(node1, &name_key),
+            Some(Value::String("Alice".into()))
         );
         assert_eq!(
-            storage.get(node1, &age_key).and_then(|v| v.as_int64()),
-            Some(30)
+            storage.get(node1, &age_key),
+            Some(Value::Int64(30))
         );
         assert_eq!(
-            storage.get(node2, &name_key).and_then(|v| v.as_str()),
-            Some("Bob")
+            storage.get(node2, &name_key),
+            Some(Value::String("Bob".into()))
         );
         assert!(storage.get(node2, &age_key).is_none());
     }
@@ -265,8 +265,8 @@ mod tests {
         assert!(!col.is_empty());
 
         assert_eq!(
-            col.get(NodeId::new(1)).and_then(|v| v.as_str()),
-            Some("Alice")
+            col.get(NodeId::new(1)),
+            Some(Value::String("Alice".into()))
         );
 
         col.remove(NodeId::new(1));

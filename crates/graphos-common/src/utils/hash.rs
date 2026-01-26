@@ -5,6 +5,7 @@
 
 use ahash::AHasher;
 use std::hash::{BuildHasher, Hasher};
+use std::sync::OnceLock;
 
 /// A fast hasher based on aHash.
 ///
@@ -21,10 +22,19 @@ pub type FxHashMap<K, V> = hashbrown::HashMap<K, V, FxBuildHasher>;
 /// A HashSet using fast hashing.
 pub type FxHashSet<T> = hashbrown::HashSet<T, FxBuildHasher>;
 
+/// Static RandomState used for consistent hashing within a program run.
+static HASH_STATE: OnceLock<ahash::RandomState> = OnceLock::new();
+
+fn get_hash_state() -> &'static ahash::RandomState {
+    HASH_STATE.get_or_init(ahash::RandomState::new)
+}
+
 /// Computes a 64-bit hash of the given value.
+///
+/// The hash is consistent within a single program run but may vary between runs.
 #[inline]
 pub fn hash_one<T: std::hash::Hash>(value: &T) -> u64 {
-    let build_hasher = ahash::RandomState::new();
+    let build_hasher = get_hash_state();
     let mut hasher = build_hasher.build_hasher();
     value.hash(&mut hasher);
     hasher.finish()

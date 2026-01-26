@@ -154,23 +154,29 @@ pub struct PyQueryBuilder {
     pub(crate) params: HashMap<String, Value>,
 }
 
-#[pymethods]
 impl PyQueryBuilder {
-    /// Create a new query builder.
-    #[new]
-    fn new(query: String) -> Self {
+    /// Create a new query builder (Rust API).
+    pub fn create(query: String) -> Self {
         Self {
             query,
             params: HashMap::new(),
         }
     }
+}
+
+#[pymethods]
+impl PyQueryBuilder {
+    /// Create a new query builder.
+    #[new]
+    fn new(query: String) -> Self {
+        Self::create(query)
+    }
 
     /// Set a parameter.
-    fn param(mut slf: PyRefMut<'_, Self>, name: String, value: &Bound<'_, PyAny>) -> PyRefMut<'_, Self> {
+    fn param(&mut self, name: String, value: &Bound<'_, PyAny>) {
         if let Ok(v) = PyValue::from_py(value) {
-            slf.params.insert(name, v);
+            self.params.insert(name, v);
         }
-        slf
     }
 
     /// Get the query string.

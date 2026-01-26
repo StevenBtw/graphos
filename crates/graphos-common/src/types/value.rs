@@ -411,8 +411,8 @@ mod tests {
         let key2: PropertyKey = "age".into();
         assert_eq!(key2.as_str(), "age");
 
-        // Keys should be comparable
-        assert!(key < key2); // "name" > "age" alphabetically, but we're using Ord
+        // Keys should be comparable ("age" < "name" alphabetically)
+        assert!(key2 < key);
     }
 
     #[test]
