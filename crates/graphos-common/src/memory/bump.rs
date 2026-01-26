@@ -100,7 +100,7 @@ impl BumpAllocator {
     /// Returns the number of chunks in use.
     #[must_use]
     #[inline]
-    pub fn chunk_count(&self) -> usize {
+    pub fn chunk_count(&mut self) -> usize {
         self.inner.iter_allocated_chunks().count()
     }
 }

@@ -105,15 +105,13 @@ impl AdjacencyList {
         }
 
         // Create new chunks from delta buffer
-        let mut current_chunk = self
-            .chunks
-            .last()
-            .filter(|c| !c.is_full())
-            .map(|c| {
-                // Take the last non-full chunk
-                self.chunks.pop().unwrap()
-            })
-            .unwrap_or_else(|| AdjacencyChunk::new(chunk_capacity));
+        // Check if last chunk has room, and if so, pop it to continue filling
+        let last_has_room = self.chunks.last().is_some_and(|c| !c.is_full());
+        let mut current_chunk = if last_has_room {
+            self.chunks.pop().unwrap()
+        } else {
+            AdjacencyChunk::new(chunk_capacity)
+        };
 
         for (dst, edge_id) in self.delta_inserts.drain(..) {
             if !current_chunk.push(dst, edge_id) {

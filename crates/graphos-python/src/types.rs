@@ -2,8 +2,10 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use graphos_common::types::Value;
+use graphos_common::types::{PropertyKey, Value};
 
 use crate::error::{PyGraphosError, PyGraphosResult};
 
@@ -50,7 +52,7 @@ impl PyValue {
     #[staticmethod]
     fn string(v: String) -> Self {
         Self {
-            inner: Value::String(v),
+            inner: Value::String(v.into()),
         }
     }
 
@@ -86,7 +88,7 @@ impl PyValue {
     /// Get string value.
     fn as_str(&self) -> PyGraphosResult<String> {
         match &self.inner {
-            Value::String(v) => Ok(v.clone()),
+            Value::String(v) => Ok(v.to_string()),
             _ => Err(PyGraphosError::Type("Value is not a string".into())),
         }
     }
@@ -107,53 +109,52 @@ impl PyValue {
             return Ok(Value::Null);
         }
 
-        if let Ok(v) = obj.downcast::<PyBool>() {
-            return Ok(Value::Bool(v.is_true()));
+        if let Ok(v) = obj.extract::<bool>() {
+            return Ok(Value::Bool(v));
         }
 
-        if let Ok(v) = obj.downcast::<PyInt>() {
-            let val: i64 = v.extract().map_err(|e| {
-                PyGraphosError::Type(format!("Cannot convert to i64: {}", e))
-            })?;
-            return Ok(Value::Int64(val));
+        if let Ok(v) = obj.extract::<i64>() {
+            return Ok(Value::Int64(v));
         }
 
-        if let Ok(v) = obj.downcast::<PyFloat>() {
-            let val: f64 = v.extract().map_err(|e| {
-                PyGraphosError::Type(format!("Cannot convert to f64: {}", e))
-            })?;
-            return Ok(Value::Float64(val));
+        if let Ok(v) = obj.extract::<f64>() {
+            return Ok(Value::Float64(v));
         }
 
-        if let Ok(v) = obj.downcast::<PyString>() {
-            let val: String = v.extract().map_err(|e| {
-                PyGraphosError::Type(format!("Cannot convert to string: {}", e))
-            })?;
-            return Ok(Value::String(val));
+        if let Ok(v) = obj.extract::<String>() {
+            return Ok(Value::String(v.into()));
         }
 
-        if let Ok(v) = obj.downcast::<PyList>() {
+        if let Ok(v) = obj.extract::<Vec<Bound<'_, PyAny>>>() {
             let mut items = Vec::new();
-            for item in v.iter() {
+            for item in v {
                 items.push(Self::from_py(&item)?);
             }
-            return Ok(Value::List(items));
+            return Ok(Value::List(items.into()));
         }
 
-        if let Ok(v) = obj.downcast::<PyDict>() {
-            let mut map = std::collections::HashMap::new();
-            for (key, value) in v.iter() {
+        if obj.is_instance_of::<PyDict>() {
+            let dict = obj.downcast::<PyDict>().map_err(|e| {
+                PyGraphosError::Type(format!("Cannot downcast to dict: {}", e))
+            })?;
+            let mut map = BTreeMap::new();
+            for (key, value) in dict.iter() {
                 let key_str: String = key.extract().map_err(|e| {
                     PyGraphosError::Type(format!("Dict key must be string: {}", e))
                 })?;
-                map.insert(key_str, Self::from_py(&value)?);
+                map.insert(PropertyKey::new(key_str), Self::from_py(&value)?);
             }
-            return Ok(Value::Map(map));
+            return Ok(Value::Map(Arc::new(map)));
         }
 
+        let type_name = obj
+            .get_type()
+            .name()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|_| "<unknown>".to_string());
         Err(PyGraphosError::Type(format!(
             "Unsupported Python type: {}",
-            obj.get_type().name().unwrap_or("<unknown>")
+            type_name
         )))
     }
 
@@ -161,21 +162,18 @@ impl PyValue {
     pub fn to_py(value: &Value, py: Python<'_>) -> PyObject {
         match value {
             Value::Null => py.None(),
-            Value::Bool(v) => v.into_pyobject(py).unwrap().into_any().unbind(),
-            Value::Int64(v) => v.into_pyobject(py).unwrap().into_any().unbind(),
-            Value::Float64(v) => v.into_pyobject(py).unwrap().into_any().unbind(),
-            Value::String(v) => v.into_pyobject(py).unwrap().into_any().unbind(),
+            Value::Bool(v) => v.to_object(py),
+            Value::Int64(v) => v.to_object(py),
+            Value::Float64(v) => v.to_object(py),
+            Value::String(v) => v.as_ref().to_object(py),
             Value::List(items) => {
-                let list = PyList::new(
-                    py,
-                    items.iter().map(|v| Self::to_py(v, py)),
-                ).unwrap();
-                list.into()
+                let py_items: Vec<PyObject> = items.iter().map(|v| Self::to_py(v, py)).collect();
+                PyList::new(py, py_items).unwrap().into()
             }
             Value::Map(map) => {
                 let dict = PyDict::new(py);
-                for (k, v) in map {
-                    dict.set_item(k, Self::to_py(v, py)).unwrap();
+                for (k, v) in map.as_ref() {
+                    dict.set_item(k.as_str(), Self::to_py(v, py)).unwrap();
                 }
                 dict.into()
             }

@@ -31,7 +31,6 @@ impl WalRecovery {
         let file = File::open(&self.path)?;
         let mut reader = BufReader::new(file);
 
-        let mut all_records = Vec::new();
         let mut current_tx_records = Vec::new();
         let mut committed_records = Vec::new();
 

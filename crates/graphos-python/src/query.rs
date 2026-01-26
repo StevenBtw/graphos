@@ -62,11 +62,14 @@ impl PyQueryResult {
             return None;
         }
 
-        let row = &slf.rows[slf.current_row];
+        let idx = slf.current_row;
         slf.current_row += 1;
 
+        let row = slf.rows[idx].clone();
+        let columns = slf.columns.clone();
+
         let dict = pyo3::types::PyDict::new(py);
-        for (col, val) in slf.columns.iter().zip(row.iter()) {
+        for (col, val) in columns.iter().zip(row.iter()) {
             dict.set_item(col, PyValue::to_py(val, py)).ok()?;
         }
         Some(dict.into())

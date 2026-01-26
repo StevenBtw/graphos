@@ -45,10 +45,10 @@ pub struct LpgStore {
     edges: RwLock<FxHashMap<EdgeId, EdgeRecord>>,
 
     /// Property storage for nodes.
-    node_properties: PropertyStorage,
+    node_properties: PropertyStorage<NodeId>,
 
     /// Property storage for edges.
-    edge_properties: PropertyStorage,
+    edge_properties: PropertyStorage<EdgeId>,
 
     /// Label name to ID mapping.
     label_to_id: RwLock<FxHashMap<Arc<str>, u8>>,

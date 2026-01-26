@@ -9,7 +9,6 @@
 use crate::types::EpochId;
 use parking_lot::RwLock;
 use std::alloc::{alloc, dealloc, Layout};
-use std::cell::UnsafeCell;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

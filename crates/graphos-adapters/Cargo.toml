@@ -29,6 +29,7 @@ crc32fast.workspace = true
 
 # Serialization
 serde.workspace = true
+bincode.workspace = true
 
 # Concurrency
 parking_lot.workspace = true

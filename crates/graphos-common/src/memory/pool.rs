@@ -158,7 +158,7 @@ impl<T> Drop for Pooled<'_, T> {
 /// A specialized pool for `Vec<T>` that clears vectors on return.
 pub type VecPool<T> = ObjectPool<Vec<T>>;
 
-impl<T> VecPool<T> {
+impl<T: 'static> VecPool<T> {
     /// Creates a new vector pool.
     pub fn new_vec_pool() -> Self {
         ObjectPool::with_reset(Vec::new, |v| v.clear())

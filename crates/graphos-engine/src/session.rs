@@ -137,10 +137,10 @@ impl Session {
     }
 
     /// Creates a node with properties.
-    pub fn create_node_with_props(
+    pub fn create_node_with_props<'a>(
         &self,
         labels: &[&str],
-        properties: impl IntoIterator<Item = (&str, Value)>,
+        properties: impl IntoIterator<Item = (&'a str, Value)>,
     ) -> NodeId {
         self.store.create_node_with_props(
             labels,

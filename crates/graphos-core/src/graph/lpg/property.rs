@@ -3,67 +3,78 @@
 //! This module provides columnar property storage optimized for
 //! efficient scanning and filtering.
 
-use graphos_common::types::{NodeId, PropertyKey, Value};
+use graphos_common::types::{EdgeId, NodeId, PropertyKey, Value};
 use graphos_common::utils::hash::FxHashMap;
 use parking_lot::RwLock;
-use std::sync::Arc;
+use std::hash::Hash;
+use std::marker::PhantomData;
+
+/// Trait for entity IDs that can be used as property storage keys.
+pub trait EntityId: Copy + Eq + Hash + 'static {}
+
+impl EntityId for NodeId {}
+impl EntityId for EdgeId {}
 
 /// Columnar property storage.
 ///
 /// Properties are stored in a columnar format where each property key
 /// has its own column. This enables efficient filtering and scanning
-/// of specific properties across many nodes.
-pub struct PropertyStorage {
+/// of specific properties across many entities.
+///
+/// Generic over the entity ID type (NodeId or EdgeId).
+pub struct PropertyStorage<Id: EntityId = NodeId> {
     /// Map from property key to column.
-    columns: RwLock<FxHashMap<PropertyKey, PropertyColumn>>,
+    columns: RwLock<FxHashMap<PropertyKey, PropertyColumn<Id>>>,
+    _marker: PhantomData<Id>,
 }
 
-impl PropertyStorage {
+impl<Id: EntityId> PropertyStorage<Id> {
     /// Creates a new property storage.
     #[must_use]
     pub fn new() -> Self {
         Self {
             columns: RwLock::new(FxHashMap::default()),
+            _marker: PhantomData,
         }
     }
 
-    /// Sets a property value for a node.
-    pub fn set(&self, node_id: NodeId, key: PropertyKey, value: Value) {
+    /// Sets a property value for an entity.
+    pub fn set(&self, id: Id, key: PropertyKey, value: Value) {
         let mut columns = self.columns.write();
         columns
             .entry(key)
             .or_insert_with(PropertyColumn::new)
-            .set(node_id, value);
+            .set(id, value);
     }
 
-    /// Gets a property value for a node.
+    /// Gets a property value for an entity.
     #[must_use]
-    pub fn get(&self, node_id: NodeId, key: &PropertyKey) -> Option<Value> {
+    pub fn get(&self, id: Id, key: &PropertyKey) -> Option<Value> {
         let columns = self.columns.read();
-        columns.get(key).and_then(|col| col.get(node_id))
+        columns.get(key).and_then(|col| col.get(id))
     }
 
-    /// Removes a property value for a node.
-    pub fn remove(&self, node_id: NodeId, key: &PropertyKey) -> Option<Value> {
+    /// Removes a property value for an entity.
+    pub fn remove(&self, id: Id, key: &PropertyKey) -> Option<Value> {
         let mut columns = self.columns.write();
-        columns.get_mut(key).and_then(|col| col.remove(node_id))
+        columns.get_mut(key).and_then(|col| col.remove(id))
     }
 
-    /// Removes all properties for a node.
-    pub fn remove_all(&self, node_id: NodeId) {
+    /// Removes all properties for an entity.
+    pub fn remove_all(&self, id: Id) {
         let mut columns = self.columns.write();
         for col in columns.values_mut() {
-            col.remove(node_id);
+            col.remove(id);
         }
     }
 
-    /// Gets all properties for a node.
+    /// Gets all properties for an entity.
     #[must_use]
-    pub fn get_all(&self, node_id: NodeId) -> FxHashMap<PropertyKey, Value> {
+    pub fn get_all(&self, id: Id) -> FxHashMap<PropertyKey, Value> {
         let columns = self.columns.read();
         let mut result = FxHashMap::default();
         for (key, col) in columns.iter() {
-            if let Some(value) = col.get(node_id) {
+            if let Some(value) = col.get(id) {
                 result.insert(key.clone(), value);
             }
         }
@@ -84,12 +95,13 @@ impl PropertyStorage {
 
     /// Gets a column by key for bulk access.
     #[must_use]
-    pub fn column(&self, key: &PropertyKey) -> Option<PropertyColumnRef<'_>> {
+    pub fn column(&self, key: &PropertyKey) -> Option<PropertyColumnRef<'_, Id>> {
         let columns = self.columns.read();
         if columns.contains_key(key) {
             Some(PropertyColumnRef {
                 _guard: columns,
                 key: key.clone(),
+                _marker: PhantomData,
             })
         } else {
             None
@@ -97,7 +109,7 @@ impl PropertyStorage {
     }
 }
 
-impl Default for PropertyStorage {
+impl<Id: EntityId> Default for PropertyStorage<Id> {
     fn default() -> Self {
         Self::new()
     }
@@ -105,14 +117,14 @@ impl Default for PropertyStorage {
 
 /// A single property column.
 ///
-/// Stores values for a specific property key across all nodes.
-pub struct PropertyColumn {
-    /// Sparse storage: node ID -> value.
+/// Stores values for a specific property key across all entities.
+pub struct PropertyColumn<Id: EntityId = NodeId> {
+    /// Sparse storage: entity ID -> value.
     /// For dense properties, this could be optimized to a flat vector.
-    values: FxHashMap<NodeId, Value>,
+    values: FxHashMap<Id, Value>,
 }
 
-impl PropertyColumn {
+impl<Id: EntityId> PropertyColumn<Id> {
     /// Creates a new empty column.
     #[must_use]
     pub fn new() -> Self {
@@ -121,20 +133,20 @@ impl PropertyColumn {
         }
     }
 
-    /// Sets a value for a node.
-    pub fn set(&mut self, node_id: NodeId, value: Value) {
-        self.values.insert(node_id, value);
+    /// Sets a value for an entity.
+    pub fn set(&mut self, id: Id, value: Value) {
+        self.values.insert(id, value);
     }
 
-    /// Gets a value for a node.
+    /// Gets a value for an entity.
     #[must_use]
-    pub fn get(&self, node_id: NodeId) -> Option<Value> {
-        self.values.get(&node_id).cloned()
+    pub fn get(&self, id: Id) -> Option<Value> {
+        self.values.get(&id).cloned()
     }
 
-    /// Removes a value for a node.
-    pub fn remove(&mut self, node_id: NodeId) -> Option<Value> {
-        self.values.remove(&node_id)
+    /// Removes a value for an entity.
+    pub fn remove(&mut self, id: Id) -> Option<Value> {
+        self.values.remove(&id)
     }
 
     /// Returns the number of values in this column.
@@ -149,22 +161,23 @@ impl PropertyColumn {
         self.values.is_empty()
     }
 
-    /// Iterates over all (node_id, value) pairs.
-    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Value)> {
+    /// Iterates over all (id, value) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (Id, &Value)> {
         self.values.iter().map(|(&id, v)| (id, v))
     }
 }
 
-impl Default for PropertyColumn {
+impl<Id: EntityId> Default for PropertyColumn<Id> {
     fn default() -> Self {
         Self::new()
     }
 }
 
 /// A reference to a property column for bulk access.
-pub struct PropertyColumnRef<'a> {
-    _guard: parking_lot::RwLockReadGuard<'a, FxHashMap<PropertyKey, PropertyColumn>>,
+pub struct PropertyColumnRef<'a, Id: EntityId = NodeId> {
+    _guard: parking_lot::RwLockReadGuard<'a, FxHashMap<PropertyKey, PropertyColumn<Id>>>,
     key: PropertyKey,
+    _marker: PhantomData<Id>,
 }
 
 #[cfg(test)]

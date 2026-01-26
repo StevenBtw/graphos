@@ -33,7 +33,7 @@ impl PyGraphosDB {
             GraphosConfig::default()
         };
 
-        let db = GraphosDB::new(config);
+        let db = GraphosDB::with_config(config);
 
         Ok(Self {
             inner: Arc::new(RwLock::new(db)),
@@ -44,7 +44,7 @@ impl PyGraphosDB {
     #[staticmethod]
     fn open(path: String) -> PyResult<Self> {
         let config = GraphosConfig::default().with_data_dir(path.into());
-        let db = GraphosDB::new(config);
+        let db = GraphosDB::with_config(config);
 
         Ok(Self {
             inner: Arc::new(RwLock::new(db)),
