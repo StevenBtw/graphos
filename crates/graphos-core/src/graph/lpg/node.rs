@@ -83,22 +83,27 @@ impl Node {
 /// The compact, cache-line friendly representation of a node.
 ///
 /// This struct is exactly 32 bytes and is used for the primary node storage.
-/// Properties are stored separately in columnar format.
+/// Properties and labels are stored separately for flexibility.
+/// Fields are ordered to minimize padding: u64s first, then u32, then u16s.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct NodeRecord {
     /// Unique node identifier.
     pub id: NodeId,
-    /// Bitmap of label IDs (supports up to 64 labels).
-    pub label_bits: u64,
+    /// Epoch this record was created in.
+    pub epoch: EpochId,
     /// Offset into the property arena.
     pub props_offset: u32,
+    /// Number of labels on this node (labels stored externally).
+    pub label_count: u16,
+    /// Reserved for future use / alignment.
+    pub _reserved: u16,
     /// Number of properties.
     pub props_count: u16,
     /// Flags (deleted, has_version, etc.).
     pub flags: NodeFlags,
-    /// Epoch this record was created in.
-    pub epoch: EpochId,
+    /// Padding to maintain 32-byte size.
+    pub _padding: u32,
 }
 
 impl NodeRecord {
@@ -112,11 +117,13 @@ impl NodeRecord {
     pub const fn new(id: NodeId, epoch: EpochId) -> Self {
         Self {
             id,
-            label_bits: 0,
+            label_count: 0,
+            _reserved: 0,
             props_offset: 0,
             props_count: 0,
             flags: NodeFlags(0),
             epoch,
+            _padding: 0,
         }
     }
 
@@ -135,32 +142,15 @@ impl NodeRecord {
         }
     }
 
-    /// Checks if this node has a label by its bit index.
+    /// Returns the number of labels on this node.
     #[must_use]
-    pub const fn has_label_bit(&self, bit: u8) -> bool {
-        if bit >= 64 {
-            return false;
-        }
-        (self.label_bits & (1 << bit)) != 0
+    pub const fn label_count(&self) -> u16 {
+        self.label_count
     }
 
-    /// Sets a label bit.
-    pub fn set_label_bit(&mut self, bit: u8) {
-        if bit < 64 {
-            self.label_bits |= 1 << bit;
-        }
-    }
-
-    /// Clears a label bit.
-    pub fn clear_label_bit(&mut self, bit: u8) {
-        if bit < 64 {
-            self.label_bits &= !(1 << bit);
-        }
-    }
-
-    /// Returns an iterator over the set label bits.
-    pub fn label_bits_iter(&self) -> impl Iterator<Item = u8> + '_ {
-        (0..64).filter(|&bit| self.has_label_bit(bit))
+    /// Sets the label count.
+    pub fn set_label_count(&mut self, count: u16) {
+        self.label_count = count;
     }
 }
 
@@ -252,22 +242,15 @@ mod tests {
     }
 
     #[test]
-    fn test_node_record_label_bits() {
+    fn test_node_record_label_count() {
         let mut record = NodeRecord::new(NodeId::new(1), EpochId::INITIAL);
 
-        assert!(!record.has_label_bit(0));
-        record.set_label_bit(0);
-        assert!(record.has_label_bit(0));
+        assert_eq!(record.label_count(), 0);
+        record.set_label_count(5);
+        assert_eq!(record.label_count(), 5);
 
-        record.set_label_bit(5);
-        record.set_label_bit(63);
-        assert!(record.has_label_bit(5));
-        assert!(record.has_label_bit(63));
-
-        let bits: Vec<_> = record.label_bits_iter().collect();
-        assert_eq!(bits, vec![0, 5, 63]);
-
-        record.clear_label_bit(5);
-        assert!(!record.has_label_bit(5));
+        // Can handle large label counts (no 64 limit)
+        record.set_label_count(1000);
+        assert_eq!(record.label_count(), 1000);
     }
 }

@@ -17,10 +17,10 @@ Graphos can be used from both Python and Rust. Choose the installation method fo
 uv add pygraphos
 ```
 
-### Using pip
+### Using pip (alternative)
 
 ```bash
-pip install pygraphos
+pip install pygraphos  # If uv is not available
 ```
 
 ### Verify Installation
@@ -108,7 +108,7 @@ cargo build --workspace --release
 
 ```bash
 cd crates/graphos-python
-pip install maturin
+uv add maturin
 maturin develop --release
 ```
 

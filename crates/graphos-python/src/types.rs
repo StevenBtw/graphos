@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList};
 
-use graphos_common::types::{PropertyKey, Value};
+use graphos_common::types::{PropertyKey, Timestamp, Value};
 
 use crate::error::{PyGraphosError, PyGraphosResult};
 
@@ -149,6 +149,29 @@ impl PyValue {
             return Ok(Value::Map(Arc::new(map)));
         }
 
+        // Handle bytes
+        if obj.is_instance_of::<PyBytes>() {
+            let bytes: &Bound<'_, PyBytes> = obj
+                .cast()
+                .map_err(|e| PyGraphosError::Type(format!("Cannot cast to bytes: {}", e)))?;
+            let byte_slice: &[u8] = bytes.as_bytes();
+            return Ok(Value::Bytes(byte_slice.into()));
+        }
+
+        // Handle datetime
+        if obj.is_instance_of::<PyDateTime>() {
+            // Extract timestamp as float (seconds since epoch)
+            let timestamp: f64 = obj
+                .call_method0("timestamp")
+                .and_then(|ts| ts.extract())
+                .map_err(|e| {
+                    PyGraphosError::Type(format!("Failed to get datetime timestamp: {}", e))
+                })?;
+            // Convert to microseconds
+            let micros = (timestamp * 1_000_000.0) as i64;
+            return Ok(Value::Timestamp(Timestamp::from_micros(micros)));
+        }
+
         let type_name = obj
             .get_type()
             .name()
@@ -200,8 +223,26 @@ impl PyValue {
                 }
                 dict.unbind().into_any()
             }
-            // Handle other types as needed
-            _ => py.None(),
+            Value::Bytes(bytes) => {
+                PyBytes::new(py, bytes.as_ref()).unbind().into_any()
+            }
+            Value::Timestamp(ts) => {
+                // Convert microseconds to seconds (as float for precision)
+                let micros = ts.as_micros();
+                let timestamp_float = micros as f64 / 1_000_000.0;
+
+                // Import datetime module and create datetime from timestamp
+                let datetime_mod = py.import("datetime").expect("datetime module should exist");
+                let datetime_class = datetime_mod
+                    .getattr("datetime")
+                    .expect("datetime.datetime should exist");
+
+                // Use utcfromtimestamp for UTC datetime
+                datetime_class
+                    .call_method1("utcfromtimestamp", (timestamp_float,))
+                    .map(|dt| dt.unbind().into_any())
+                    .unwrap_or_else(|_| py.None())
+            }
         }
     }
 }

@@ -274,6 +274,7 @@ pub struct NodeValueResultBuilder {
 
 impl NodeValueResultBuilder {
     /// Creates a new builder with the given value column name.
+    #[allow(dead_code)]
     pub fn new(value_column_name: impl Into<String>) -> Self {
         Self {
             node_ids: Vec::new(),

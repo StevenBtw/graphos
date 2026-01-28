@@ -31,6 +31,12 @@ bytes.workspace = true
 parking_lot.workspace = true
 crossbeam.workspace = true
 
+# Async
+tokio.workspace = true
+
+# Regex
+regex.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true
 criterion.workspace = true

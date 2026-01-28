@@ -19,10 +19,14 @@ mod expand;
 mod filter;
 mod join;
 mod limit;
+mod merge;
+mod mutation;
 mod project;
 pub mod push;
 mod scan;
 mod sort;
+mod union;
+mod unwind;
 
 pub use aggregate::{
     AggregateExpr, AggregateFunction, HashAggregateOperator, SimpleAggregateOperator,
@@ -37,6 +41,13 @@ pub use join::{
     EqualityCondition, HashJoinOperator, HashKey, JoinCondition, JoinType, NestedLoopJoinOperator,
 };
 pub use limit::{LimitOperator, LimitSkipOperator, SkipOperator};
+pub use mutation::{
+    AddLabelOperator, CreateEdgeOperator, CreateNodeOperator, DeleteEdgeOperator,
+    DeleteNodeOperator, PropertySource, RemoveLabelOperator, SetPropertyOperator,
+};
+pub use merge::MergeOperator;
+pub use union::UnionOperator;
+pub use unwind::UnwindOperator;
 pub use project::{ProjectExpr, ProjectOperator};
 pub use push::{
     AggregatePushOperator, DistinctMaterializingOperator, DistinctPushOperator, FilterPushOperator,

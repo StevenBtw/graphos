@@ -396,7 +396,10 @@ impl Default for CardinalityEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::plan::{FilterOp, JoinCondition, NodeScanOp};
+    use crate::query::plan::{
+        DistinctOp, ExpandDirection, ExpandOp, FilterOp, JoinCondition, NodeScanOp, ProjectOp,
+        Projection, ReturnItem, ReturnOp, SkipOp, SortKey, SortOp, SortOrder,
+    };
     use graphos_common::types::Value;
 
     #[test]
@@ -530,5 +533,610 @@ mod tests {
         let cardinality = estimator.estimate(&group_agg);
         // Should be less than input
         assert!(cardinality < 1000.0);
+    }
+
+    #[test]
+    fn test_node_scan_without_stats() {
+        let estimator = CardinalityEstimator::new();
+
+        let scan = LogicalOperator::NodeScan(NodeScanOp {
+            variable: "n".to_string(),
+            label: Some("Unknown".to_string()),
+            input: None,
+        });
+
+        let cardinality = estimator.estimate(&scan);
+        // Should return default (1000)
+        assert!((cardinality - 1000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_node_scan_no_label() {
+        let estimator = CardinalityEstimator::new();
+
+        let scan = LogicalOperator::NodeScan(NodeScanOp {
+            variable: "n".to_string(),
+            label: None,
+            input: None,
+        });
+
+        let cardinality = estimator.estimate(&scan);
+        // Should scan all nodes (default)
+        assert!((cardinality - 1000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_filter_inequality_selectivity() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let filter = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Property {
+                    variable: "n".to_string(),
+                    property: "age".to_string(),
+                }),
+                op: BinaryOp::Ne,
+                right: Box::new(LogicalExpression::Literal(Value::Int64(30))),
+            },
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&filter);
+        // Inequality selectivity is 0.99, so 1000 * 0.99 = 990
+        assert!(cardinality > 900.0);
+    }
+
+    #[test]
+    fn test_filter_range_selectivity() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let filter = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Property {
+                    variable: "n".to_string(),
+                    property: "age".to_string(),
+                }),
+                op: BinaryOp::Gt,
+                right: Box::new(LogicalExpression::Literal(Value::Int64(30))),
+            },
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&filter);
+        // Range selectivity is 0.33, so 1000 * 0.33 = 330
+        assert!(cardinality < 500.0);
+        assert!(cardinality > 100.0);
+    }
+
+    #[test]
+    fn test_filter_and_selectivity() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let filter = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Literal(Value::Bool(true))),
+                op: BinaryOp::And,
+                right: Box::new(LogicalExpression::Literal(Value::Bool(true))),
+            },
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&filter);
+        // AND reduces selectivity (multiply)
+        assert!(cardinality < 1000.0);
+    }
+
+    #[test]
+    fn test_filter_or_selectivity() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let filter = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Literal(Value::Bool(true))),
+                op: BinaryOp::Or,
+                right: Box::new(LogicalExpression::Literal(Value::Bool(true))),
+            },
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&filter);
+        // OR increases selectivity
+        assert!(cardinality < 1000.0);
+    }
+
+    #[test]
+    fn test_filter_literal_true() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let filter = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Literal(Value::Bool(true)),
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&filter);
+        // Literal true has selectivity 1.0
+        assert!((cardinality - 1000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_filter_literal_false() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let filter = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Literal(Value::Bool(false)),
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&filter);
+        // Literal false has selectivity 0.0, but min is 1.0
+        assert!((cardinality - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_unary_not_selectivity() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let filter = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Unary {
+                op: UnaryOp::Not,
+                operand: Box::new(LogicalExpression::Literal(Value::Bool(true))),
+            },
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&filter);
+        // NOT inverts selectivity
+        assert!(cardinality < 1000.0);
+    }
+
+    #[test]
+    fn test_unary_is_null_selectivity() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let filter = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Unary {
+                op: UnaryOp::IsNull,
+                operand: Box::new(LogicalExpression::Variable("x".to_string())),
+            },
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&filter);
+        // IS NULL has selectivity 0.05
+        assert!(cardinality < 100.0);
+    }
+
+    #[test]
+    fn test_expand_cardinality() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(100));
+
+        let expand = LogicalOperator::Expand(ExpandOp {
+            from_variable: "a".to_string(),
+            to_variable: "b".to_string(),
+            edge_variable: None,
+            direction: ExpandDirection::Outgoing,
+            edge_type: None,
+            min_hops: 1,
+            max_hops: Some(1),
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "a".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&expand);
+        // Expand multiplies by fanout (10)
+        assert!(cardinality > 100.0);
+    }
+
+    #[test]
+    fn test_expand_with_edge_type_filter() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(100));
+
+        let expand = LogicalOperator::Expand(ExpandOp {
+            from_variable: "a".to_string(),
+            to_variable: "b".to_string(),
+            edge_variable: None,
+            direction: ExpandDirection::Outgoing,
+            edge_type: Some("KNOWS".to_string()),
+            min_hops: 1,
+            max_hops: Some(1),
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "a".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&expand);
+        // With edge type, fanout is reduced by half
+        assert!(cardinality > 100.0);
+    }
+
+    #[test]
+    fn test_expand_variable_length() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(100));
+
+        let expand = LogicalOperator::Expand(ExpandOp {
+            from_variable: "a".to_string(),
+            to_variable: "b".to_string(),
+            edge_variable: None,
+            direction: ExpandDirection::Outgoing,
+            edge_type: None,
+            min_hops: 1,
+            max_hops: Some(3),
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "a".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&expand);
+        // Variable length path has much higher cardinality
+        assert!(cardinality > 500.0);
+    }
+
+    #[test]
+    fn test_join_cross_product() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(100));
+        estimator.add_table_stats("Company", TableStats::new(50));
+
+        let join = LogicalOperator::Join(JoinOp {
+            left: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "p".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+            right: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "c".to_string(),
+                label: Some("Company".to_string()),
+                input: None,
+            })),
+            join_type: JoinType::Cross,
+            conditions: vec![],
+        });
+
+        let cardinality = estimator.estimate(&join);
+        // Cross join = 100 * 50 = 5000
+        assert!((cardinality - 5000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_join_left_outer() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+        estimator.add_table_stats("Company", TableStats::new(10));
+
+        let join = LogicalOperator::Join(JoinOp {
+            left: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "p".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+            right: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "c".to_string(),
+                label: Some("Company".to_string()),
+                input: None,
+            })),
+            join_type: JoinType::Left,
+            conditions: vec![JoinCondition {
+                left: LogicalExpression::Variable("p".to_string()),
+                right: LogicalExpression::Variable("c".to_string()),
+            }],
+        });
+
+        let cardinality = estimator.estimate(&join);
+        // Left join returns at least all left rows
+        assert!(cardinality >= 1000.0);
+    }
+
+    #[test]
+    fn test_join_semi() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+        estimator.add_table_stats("Company", TableStats::new(100));
+
+        let join = LogicalOperator::Join(JoinOp {
+            left: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "p".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+            right: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "c".to_string(),
+                label: Some("Company".to_string()),
+                input: None,
+            })),
+            join_type: JoinType::Semi,
+            conditions: vec![],
+        });
+
+        let cardinality = estimator.estimate(&join);
+        // Semi join returns at most left cardinality
+        assert!(cardinality <= 1000.0);
+    }
+
+    #[test]
+    fn test_join_anti() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+        estimator.add_table_stats("Company", TableStats::new(100));
+
+        let join = LogicalOperator::Join(JoinOp {
+            left: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "p".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+            right: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "c".to_string(),
+                label: Some("Company".to_string()),
+                input: None,
+            })),
+            join_type: JoinType::Anti,
+            conditions: vec![],
+        });
+
+        let cardinality = estimator.estimate(&join);
+        // Anti join returns at most left cardinality
+        assert!(cardinality <= 1000.0);
+        assert!(cardinality >= 1.0);
+    }
+
+    #[test]
+    fn test_project_preserves_cardinality() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let project = LogicalOperator::Project(ProjectOp {
+            projections: vec![Projection {
+                expression: LogicalExpression::Variable("n".to_string()),
+                alias: None,
+            }],
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&project);
+        assert!((cardinality - 1000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_sort_preserves_cardinality() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let sort = LogicalOperator::Sort(SortOp {
+            keys: vec![SortKey {
+                expression: LogicalExpression::Variable("n".to_string()),
+                order: SortOrder::Ascending,
+            }],
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&sort);
+        assert!((cardinality - 1000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_distinct_reduces_cardinality() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let distinct = LogicalOperator::Distinct(DistinctOp {
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&distinct);
+        // Distinct assumes 50% unique
+        assert!((cardinality - 500.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_skip_reduces_cardinality() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let skip = LogicalOperator::Skip(SkipOp {
+            count: 100,
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&skip);
+        assert!((cardinality - 900.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_return_preserves_cardinality() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(1000));
+
+        let ret = LogicalOperator::Return(ReturnOp {
+            items: vec![ReturnItem {
+                expression: LogicalExpression::Variable("n".to_string()),
+                alias: None,
+            }],
+            distinct: false,
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&ret);
+        assert!((cardinality - 1000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_empty_cardinality() {
+        let estimator = CardinalityEstimator::new();
+        let cardinality = estimator.estimate(&LogicalOperator::Empty);
+        assert!((cardinality).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_table_stats_with_column() {
+        let stats = TableStats::new(1000).with_column(
+            "age",
+            ColumnStats::new(50).with_nulls(10).with_range(0.0, 100.0),
+        );
+
+        assert_eq!(stats.row_count, 1000);
+        let col = stats.columns.get("age").unwrap();
+        assert_eq!(col.distinct_count, 50);
+        assert_eq!(col.null_count, 10);
+        assert!((col.min_value.unwrap() - 0.0).abs() < 0.001);
+        assert!((col.max_value.unwrap() - 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_estimator_default() {
+        let estimator = CardinalityEstimator::default();
+        let scan = LogicalOperator::NodeScan(NodeScanOp {
+            variable: "n".to_string(),
+            label: None,
+            input: None,
+        });
+        let cardinality = estimator.estimate(&scan);
+        assert!((cardinality - 1000.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_set_avg_fanout() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(100));
+        estimator.set_avg_fanout(5.0);
+
+        let expand = LogicalOperator::Expand(ExpandOp {
+            from_variable: "a".to_string(),
+            to_variable: "b".to_string(),
+            edge_variable: None,
+            direction: ExpandDirection::Outgoing,
+            edge_type: None,
+            min_hops: 1,
+            max_hops: Some(1),
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "a".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let cardinality = estimator.estimate(&expand);
+        // With fanout 5: 100 * 5 = 500
+        assert!((cardinality - 500.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_multiple_group_by_keys_reduce_cardinality() {
+        // The current implementation uses a simplified model where more group by keys
+        // results in greater reduction (dividing by 10^num_keys). This is a simplification
+        // that works for most cases where group by keys are correlated.
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Person", TableStats::new(10000));
+
+        let single_group = LogicalOperator::Aggregate(AggregateOp {
+            group_by: vec![LogicalExpression::Property {
+                variable: "n".to_string(),
+                property: "city".to_string(),
+            }],
+            aggregates: vec![],
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let multi_group = LogicalOperator::Aggregate(AggregateOp {
+            group_by: vec![
+                LogicalExpression::Property {
+                    variable: "n".to_string(),
+                    property: "city".to_string(),
+                },
+                LogicalExpression::Property {
+                    variable: "n".to_string(),
+                    property: "country".to_string(),
+                },
+            ],
+            aggregates: vec![],
+            input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                variable: "n".to_string(),
+                label: Some("Person".to_string()),
+                input: None,
+            })),
+        });
+
+        let single_card = estimator.estimate(&single_group);
+        let multi_card = estimator.estimate(&multi_group);
+
+        // Both should reduce cardinality from input
+        assert!(single_card < 10000.0);
+        assert!(multi_card < 10000.0);
+        // Both should be at least 1
+        assert!(single_card >= 1.0);
+        assert!(multi_card >= 1.0);
     }
 }

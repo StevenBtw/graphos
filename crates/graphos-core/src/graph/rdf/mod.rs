@@ -39,4 +39,4 @@ mod triple;
 
 pub use store::{RdfStore, RdfStoreConfig};
 pub use term::{BlankNode, Iri, Literal, Term};
-pub use triple::Triple;
+pub use triple::{Triple, TriplePattern};

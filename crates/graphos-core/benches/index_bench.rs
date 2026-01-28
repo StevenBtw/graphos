@@ -1,17 +1,19 @@
 //! Benchmarks for index structures.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 
-use graphos_common::types::NodeId;
-use graphos_core::index::adjacency::ChunkedAdjacencyList;
+use criterion::{criterion_group, criterion_main, Criterion};
+
+use graphos_common::types::{EdgeId, NodeId};
+use graphos_core::index::adjacency::ChunkedAdjacency;
 use graphos_core::index::hash::HashIndex;
 
 fn bench_adjacency_insert(c: &mut Criterion) {
     c.bench_function("adjacency_insert_1000", |b| {
         b.iter(|| {
-            let mut adj = ChunkedAdjacencyList::new();
+            let adj = ChunkedAdjacency::new();
             for i in 0..1000u64 {
-                adj.add_edge(NodeId(i % 100), NodeId(i), i as u32);
+                adj.add_edge(NodeId(i % 100), NodeId(i), EdgeId(i));
             }
             black_box(adj)
         });
@@ -19,15 +21,15 @@ fn bench_adjacency_insert(c: &mut Criterion) {
 }
 
 fn bench_adjacency_lookup(c: &mut Criterion) {
-    let mut adj = ChunkedAdjacencyList::new();
+    let adj = ChunkedAdjacency::new();
     for i in 0..10000u64 {
-        adj.add_edge(NodeId(i % 100), NodeId(i), i as u32);
+        adj.add_edge(NodeId(i % 100), NodeId(i), EdgeId(i));
     }
 
     c.bench_function("adjacency_lookup", |b| {
         b.iter(|| {
             for i in 0..100u64 {
-                black_box(adj.get_neighbors(NodeId(i)));
+                black_box(adj.neighbors(NodeId(i)));
             }
         });
     });
@@ -36,7 +38,7 @@ fn bench_adjacency_lookup(c: &mut Criterion) {
 fn bench_hash_index_insert(c: &mut Criterion) {
     c.bench_function("hash_index_insert_1000", |b| {
         b.iter(|| {
-            let mut index: HashIndex<u64, NodeId> = HashIndex::new();
+            let index: HashIndex<u64, NodeId> = HashIndex::new();
             for i in 0..1000u64 {
                 index.insert(i, NodeId(i));
             }
@@ -46,7 +48,7 @@ fn bench_hash_index_insert(c: &mut Criterion) {
 }
 
 fn bench_hash_index_lookup(c: &mut Criterion) {
-    let mut index: HashIndex<u64, NodeId> = HashIndex::new();
+    let index: HashIndex<u64, NodeId> = HashIndex::new();
     for i in 0..10000u64 {
         index.insert(i, NodeId(i));
     }

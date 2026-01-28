@@ -3,7 +3,13 @@
 //! Translates parsed Cypher queries into the common logical plan representation
 //! that can be optimized and executed.
 
-use crate::query::plan::*;
+use crate::query::plan::{
+    AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, CreateEdgeOp, CreateNodeOp,
+    DeleteNodeOp, DistinctOp, ExpandDirection, ExpandOp, FilterOp, LeftJoinOp, LimitOp,
+    LogicalExpression, LogicalOperator, LogicalPlan, MergeOp, NodeScanOp, ProjectOp, Projection,
+    RemoveLabelOp, ReturnItem, ReturnOp, SetPropertyOp, SkipOp, SortKey, SortOp, SortOrder,
+    UnaryOp, UnwindOp,
+};
 use graphos_adapters::query::cypher::{self, ast};
 use graphos_common::types::Value;
 use graphos_common::utils::error::{Error, Result};
@@ -31,7 +37,7 @@ impl CypherTranslator {
         match stmt {
             ast::Statement::Query(query) => self.translate_query(query),
             ast::Statement::Create(create) => self.translate_create_statement(create),
-            ast::Statement::Merge(_) => Err(Error::Internal("MERGE not yet supported".into())),
+            ast::Statement::Merge(merge) => self.translate_merge_statement(&merge),
             ast::Statement::Delete(_) => Err(Error::Internal("DELETE not yet supported".into())),
             ast::Statement::Set(_) => Err(Error::Internal("SET not yet supported".into())),
             ast::Statement::Remove(_) => Err(Error::Internal("REMOVE not yet supported".into())),
@@ -56,21 +62,23 @@ impl CypherTranslator {
     ) -> Result<LogicalOperator> {
         match clause {
             ast::Clause::Match(match_clause) => self.translate_match(match_clause, input),
-            ast::Clause::OptionalMatch(match_clause) => self.translate_match(match_clause, input),
+            ast::Clause::OptionalMatch(match_clause) => {
+                self.translate_optional_match(match_clause, input)
+            }
             ast::Clause::Where(where_clause) => self.translate_where(where_clause, input),
             ast::Clause::With(with_clause) => self.translate_with(with_clause, input),
             ast::Clause::Return(return_clause) => self.translate_return(return_clause, input),
-            ast::Clause::Unwind(_) => Err(Error::Internal("UNWIND not yet supported".into())),
+            ast::Clause::Unwind(unwind_clause) => self.translate_unwind(unwind_clause, input),
             ast::Clause::OrderBy(order_by) => self.translate_order_by(order_by, input),
             ast::Clause::Skip(expr) => self.translate_skip(expr, input),
             ast::Clause::Limit(expr) => self.translate_limit(expr, input),
             ast::Clause::Create(create_clause) => {
                 self.translate_create_clause(create_clause, input)
             }
-            ast::Clause::Merge(_) => Err(Error::Internal("MERGE not yet supported".into())),
-            ast::Clause::Delete(_) => Err(Error::Internal("DELETE not yet supported".into())),
-            ast::Clause::Set(_) => Err(Error::Internal("SET not yet supported".into())),
-            ast::Clause::Remove(_) => Err(Error::Internal("REMOVE not yet supported".into())),
+            ast::Clause::Merge(merge_clause) => self.translate_merge(merge_clause, input),
+            ast::Clause::Delete(delete_clause) => self.translate_delete(delete_clause, input),
+            ast::Clause::Set(set_clause) => self.translate_set(set_clause, input),
+            ast::Clause::Remove(remove_clause) => self.translate_remove(remove_clause, input),
         }
     }
 
@@ -86,6 +94,29 @@ impl CypherTranslator {
         }
 
         plan.ok_or_else(|| Error::Internal("Empty MATCH pattern".into()))
+    }
+
+    fn translate_optional_match(
+        &self,
+        match_clause: &ast::MatchClause,
+        input: Option<LogicalOperator>,
+    ) -> Result<LogicalOperator> {
+        // OPTIONAL MATCH uses LEFT JOIN semantics
+        let input = input.ok_or_else(|| Error::Internal("OPTIONAL MATCH requires input".into()))?;
+
+        // Build the match pattern
+        let mut right: Option<LogicalOperator> = None;
+        for pattern in &match_clause.patterns {
+            right = Some(self.translate_pattern(pattern, right)?);
+        }
+
+        let right = right.ok_or_else(|| Error::Internal("Empty OPTIONAL MATCH pattern".into()))?;
+
+        Ok(LogicalOperator::LeftJoin(LeftJoinOp {
+            left: Box::new(input),
+            right: Box::new(right),
+            condition: None,
+        }))
     }
 
     fn translate_pattern(
@@ -237,6 +268,142 @@ impl CypherTranslator {
         Ok(plan)
     }
 
+    fn translate_unwind(
+        &self,
+        unwind_clause: &ast::UnwindClause,
+        input: Option<LogicalOperator>,
+    ) -> Result<LogicalOperator> {
+        // UNWIND can work with or without prior input
+        // If there's no input, create an implicit single row (Empty with one result)
+        let input = input.unwrap_or(LogicalOperator::Empty);
+
+        let expression = self.translate_expression(&unwind_clause.expression)?;
+
+        Ok(LogicalOperator::Unwind(UnwindOp {
+            expression,
+            variable: unwind_clause.variable.clone(),
+            input: Box::new(input),
+        }))
+    }
+
+    fn translate_merge_statement(&self, merge: &ast::MergeClause) -> Result<LogicalPlan> {
+        let op = self.translate_merge(merge, None)?;
+        Ok(LogicalPlan { root: op })
+    }
+
+    fn translate_merge(
+        &self,
+        merge_clause: &ast::MergeClause,
+        input: Option<LogicalOperator>,
+    ) -> Result<LogicalOperator> {
+        let input = input.unwrap_or(LogicalOperator::Empty);
+
+        // Extract node information from the pattern
+        // For now, we only support simple single-node patterns: (n:Label {props})
+        let pattern = &merge_clause.pattern;
+
+        // Extract node from the pattern
+        let node = match pattern {
+            ast::Pattern::Node(n) => n,
+            ast::Pattern::Path(path) => &path.start,
+            ast::Pattern::NamedPath { pattern: inner, .. } => {
+                match inner.as_ref() {
+                    ast::Pattern::Node(n) => n,
+                    ast::Pattern::Path(path) => &path.start,
+                    _ => return Err(Error::Internal("MERGE NamedPath must contain a node".into())),
+                }
+            }
+        };
+
+        let variable = node
+            .variable
+            .clone()
+            .unwrap_or_else(|| format!("_merge_{}", 0));
+        let labels: Vec<String> = node.labels.clone();
+
+        // Extract properties from the node pattern
+        let match_properties: Vec<(String, LogicalExpression)> = node
+            .properties
+            .iter()
+            .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
+            .collect::<Result<Vec<_>>>()?;
+
+        // Extract ON CREATE properties
+        let on_create: Vec<(String, LogicalExpression)> = if let Some(set_clause) = &merge_clause.on_create {
+            self.extract_set_properties(set_clause)?
+        } else {
+            Vec::new()
+        };
+
+        // Extract ON MATCH properties
+        let on_match: Vec<(String, LogicalExpression)> = if let Some(set_clause) = &merge_clause.on_match {
+            self.extract_set_properties(set_clause)?
+        } else {
+            Vec::new()
+        };
+
+        Ok(LogicalOperator::Merge(MergeOp {
+            variable,
+            labels,
+            match_properties,
+            on_create,
+            on_match,
+            input: Box::new(input),
+        }))
+    }
+
+    /// Extracts properties from a map expression.
+    #[allow(dead_code)]
+    fn extract_map_properties(
+        &self,
+        expr: &ast::Expression,
+    ) -> Result<Vec<(String, LogicalExpression)>> {
+        match expr {
+            ast::Expression::Map(pairs) => {
+                pairs
+                    .iter()
+                    .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
+                    .collect()
+            }
+            _ => Err(Error::Internal("Expected map expression for properties".into())),
+        }
+    }
+
+    /// Extracts properties from a SET clause.
+    fn extract_set_properties(
+        &self,
+        set_clause: &ast::SetClause,
+    ) -> Result<Vec<(String, LogicalExpression)>> {
+        let mut properties = Vec::new();
+        for item in &set_clause.items {
+            match item {
+                ast::SetItem::Property { variable: _, property, value } => {
+                    properties.push((property.clone(), self.translate_expression(value)?));
+                }
+                ast::SetItem::AllProperties { variable: _, properties: prop_expr } => {
+                    // n = {props} - extract all properties from the map
+                    if let ast::Expression::Map(pairs) = prop_expr {
+                        for (k, v) in pairs {
+                            properties.push((k.clone(), self.translate_expression(v)?));
+                        }
+                    }
+                }
+                ast::SetItem::MergeProperties { variable: _, properties: prop_expr } => {
+                    // n += {props} - merge properties
+                    if let ast::Expression::Map(pairs) = prop_expr {
+                        for (k, v) in pairs {
+                            properties.push((k.clone(), self.translate_expression(v)?));
+                        }
+                    }
+                }
+                ast::SetItem::Labels { .. } => {
+                    // Labels are handled separately
+                }
+            }
+        }
+        Ok(properties)
+    }
+
     fn translate_return(
         &self,
         return_clause: &ast::ReturnClause,
@@ -244,29 +411,104 @@ impl CypherTranslator {
     ) -> Result<LogicalOperator> {
         let input = input.ok_or_else(|| Error::Internal("RETURN requires input".into()))?;
 
-        let items = match &return_clause.items {
-            ast::ReturnItems::All => {
-                vec![ReturnItem {
-                    expression: LogicalExpression::Variable("*".into()),
-                    alias: None,
-                }]
+        // Check if RETURN contains aggregate functions
+        let has_aggregates = match &return_clause.items {
+            ast::ReturnItems::All => false,
+            ast::ReturnItems::Explicit(items) => {
+                items.iter().any(|item| contains_aggregate(&item.expression))
             }
-            ast::ReturnItems::Explicit(items) => items
-                .iter()
-                .map(|item| {
-                    Ok(ReturnItem {
-                        expression: self.translate_expression(&item.expression)?,
-                        alias: item.alias.clone(),
-                    })
-                })
-                .collect::<Result<_>>()?,
         };
 
-        Ok(LogicalOperator::Return(ReturnOp {
-            items,
-            distinct: return_clause.distinct,
-            input: Box::new(input),
-        }))
+        if has_aggregates {
+            // Extract aggregates and group-by expressions
+            let (aggregates, group_by) = self.extract_aggregates_and_groups(return_clause)?;
+
+            Ok(LogicalOperator::Aggregate(AggregateOp {
+                group_by,
+                aggregates,
+                input: Box::new(input),
+            }))
+        } else {
+            // Normal return without aggregates
+            let items = match &return_clause.items {
+                ast::ReturnItems::All => {
+                    vec![ReturnItem {
+                        expression: LogicalExpression::Variable("*".into()),
+                        alias: None,
+                    }]
+                }
+                ast::ReturnItems::Explicit(items) => items
+                    .iter()
+                    .map(|item| {
+                        Ok(ReturnItem {
+                            expression: self.translate_expression(&item.expression)?,
+                            alias: item.alias.clone(),
+                        })
+                    })
+                    .collect::<Result<_>>()?,
+            };
+
+            Ok(LogicalOperator::Return(ReturnOp {
+                items,
+                distinct: return_clause.distinct,
+                input: Box::new(input),
+            }))
+        }
+    }
+
+    /// Extracts aggregate and group-by expressions from RETURN items.
+    fn extract_aggregates_and_groups(
+        &self,
+        return_clause: &ast::ReturnClause,
+    ) -> Result<(Vec<AggregateExpr>, Vec<LogicalExpression>)> {
+        let mut aggregates = Vec::new();
+        let mut group_by = Vec::new();
+
+        let items = match &return_clause.items {
+            ast::ReturnItems::All => return Err(Error::Internal("Cannot use RETURN * with aggregates".into())),
+            ast::ReturnItems::Explicit(items) => items,
+        };
+
+        for item in items {
+            if let Some(agg_expr) = self.try_extract_aggregate(&item.expression, &item.alias)? {
+                aggregates.push(agg_expr);
+            } else {
+                // Non-aggregate expressions become group-by keys
+                let expr = self.translate_expression(&item.expression)?;
+                group_by.push(expr);
+            }
+        }
+
+        Ok((aggregates, group_by))
+    }
+
+    /// Tries to extract an aggregate expression from an AST expression.
+    fn try_extract_aggregate(
+        &self,
+        expr: &ast::Expression,
+        alias: &Option<String>,
+    ) -> Result<Option<AggregateExpr>> {
+        match expr {
+            ast::Expression::FunctionCall { name, args, distinct } => {
+                if let Some(function) = to_aggregate_function(name) {
+                    let expression = if args.is_empty() {
+                        None
+                    } else {
+                        Some(self.translate_expression(&args[0])?)
+                    };
+
+                    Ok(Some(AggregateExpr {
+                        function,
+                        expression,
+                        distinct: *distinct,
+                        alias: alias.clone(),
+                    }))
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => Ok(None),
+        }
     }
 
     fn translate_order_by(
@@ -427,6 +669,118 @@ impl CypherTranslator {
         Ok(LogicalPlan::new(root))
     }
 
+    fn translate_delete(
+        &self,
+        delete_clause: &ast::DeleteClause,
+        input: Option<LogicalOperator>,
+    ) -> Result<LogicalOperator> {
+        let input = input.ok_or_else(|| Error::Internal("DELETE requires input".into()))?;
+
+        let mut plan = input;
+
+        // Delete each expression (typically variables)
+        for expr in &delete_clause.expressions {
+            if let ast::Expression::Variable(var) = expr {
+                // Check if it's a node or edge - for simplicity, try node first
+                plan = LogicalOperator::DeleteNode(DeleteNodeOp {
+                    variable: var.clone(),
+                    input: Box::new(plan),
+                });
+            } else {
+                return Err(Error::Internal(
+                    "DELETE only supports variable expressions".into(),
+                ));
+            }
+        }
+
+        Ok(plan)
+    }
+
+    fn translate_set(
+        &self,
+        set_clause: &ast::SetClause,
+        input: Option<LogicalOperator>,
+    ) -> Result<LogicalOperator> {
+        let input = input.ok_or_else(|| Error::Internal("SET requires input".into()))?;
+
+        let mut plan = input;
+
+        // Group items by variable
+        for item in &set_clause.items {
+            match item {
+                ast::SetItem::Property { variable, property, value } => {
+                    // SET n.prop = value
+                    let value_expr = self.translate_expression(value)?;
+                    plan = LogicalOperator::SetProperty(SetPropertyOp {
+                        variable: variable.clone(),
+                        properties: vec![(property.clone(), value_expr)],
+                        replace: false,
+                        input: Box::new(plan),
+                    });
+                }
+                ast::SetItem::AllProperties { variable, properties } => {
+                    // SET n = {...} or SET n = m
+                    let value_expr = self.translate_expression(properties)?;
+                    plan = LogicalOperator::SetProperty(SetPropertyOp {
+                        variable: variable.clone(),
+                        properties: vec![("*".to_string(), value_expr)],
+                        replace: true,
+                        input: Box::new(plan),
+                    });
+                }
+                ast::SetItem::MergeProperties { variable, properties } => {
+                    // SET n += {...}
+                    let value_expr = self.translate_expression(properties)?;
+                    plan = LogicalOperator::SetProperty(SetPropertyOp {
+                        variable: variable.clone(),
+                        properties: vec![("*".to_string(), value_expr)],
+                        replace: false,
+                        input: Box::new(plan),
+                    });
+                }
+                ast::SetItem::Labels { .. } => {
+                    return Err(Error::Internal("SET labels not yet supported".into()));
+                }
+            }
+        }
+
+        Ok(plan)
+    }
+
+    fn translate_remove(
+        &self,
+        remove_clause: &ast::RemoveClause,
+        input: Option<LogicalOperator>,
+    ) -> Result<LogicalOperator> {
+        let input = input.ok_or_else(|| Error::Internal("REMOVE requires input".into()))?;
+
+        let mut plan = input;
+
+        for item in &remove_clause.items {
+            match item {
+                ast::RemoveItem::Property { variable, property } => {
+                    // REMOVE n.prop sets the property to null
+                    plan = LogicalOperator::SetProperty(SetPropertyOp {
+                        variable: variable.clone(),
+                        properties: vec![(property.clone(), LogicalExpression::Literal(Value::Null))],
+                        replace: false,
+                        input: Box::new(plan),
+                    });
+                }
+                ast::RemoveItem::Labels { variable, labels } => {
+                    // REMOVE n:Label removes labels from the node
+                    plan = LogicalOperator::RemoveLabel(RemoveLabelOp {
+                        variable: variable.clone(),
+                        labels: labels.clone(),
+                        input: Box::new(plan),
+                    });
+                }
+            }
+        }
+
+        Ok(plan)
+    }
+
     fn translate_expression(&self, expr: &ast::Expression) -> Result<LogicalExpression> {
         match expr {
             ast::Expression::Literal(lit) => self.translate_literal(lit),
@@ -444,11 +798,31 @@ impl CypherTranslator {
                     ))
                 }
             }
-            ast::Expression::IndexAccess { .. } => {
-                Err(Error::Internal("Index access not yet supported".into()))
+            ast::Expression::IndexAccess { base, index } => {
+                let base_expr = self.translate_expression(base)?;
+                let index_expr = self.translate_expression(index)?;
+                Ok(LogicalExpression::IndexAccess {
+                    base: Box::new(base_expr),
+                    index: Box::new(index_expr),
+                })
             }
-            ast::Expression::SliceAccess { .. } => {
-                Err(Error::Internal("Slice access not yet supported".into()))
+            ast::Expression::SliceAccess { base, start, end } => {
+                let base_expr = self.translate_expression(base)?;
+                let start_expr = start
+                    .as_ref()
+                    .map(|s| self.translate_expression(s))
+                    .transpose()?
+                    .map(Box::new);
+                let end_expr = end
+                    .as_ref()
+                    .map(|e| self.translate_expression(e))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(LogicalExpression::SliceAccess {
+                    base: Box::new(base_expr),
+                    start: start_expr,
+                    end: end_expr,
+                })
             }
             ast::Expression::Binary { left, op, right } => {
                 let left_expr = self.translate_expression(left)?;
@@ -489,8 +863,12 @@ impl CypherTranslator {
 
                 Ok(LogicalExpression::List(translated))
             }
-            ast::Expression::Map(_) => {
-                Err(Error::Internal("Map literals not yet supported".into()))
+            ast::Expression::Map(pairs) => {
+                let translated: Vec<(String, LogicalExpression)> = pairs
+                    .iter()
+                    .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
+                    .collect::<Result<_>>()?;
+                Ok(LogicalExpression::Map(translated))
             }
             ast::Expression::Case {
                 input,
@@ -525,9 +903,32 @@ impl CypherTranslator {
                     else_clause: translated_else,
                 })
             }
-            ast::Expression::ListComprehension { .. } => Err(Error::Internal(
-                "List comprehension not yet supported".into(),
-            )),
+            ast::Expression::ListComprehension {
+                variable,
+                list,
+                filter,
+                projection,
+            } => {
+                let list_expr = self.translate_expression(list)?;
+                let filter_expr = filter
+                    .as_ref()
+                    .map(|f| self.translate_expression(f))
+                    .transpose()?
+                    .map(Box::new);
+                // If no projection, use the variable itself as the map expression
+                let map_expr = if let Some(proj) = projection {
+                    self.translate_expression(proj)?
+                } else {
+                    LogicalExpression::Variable(variable.clone())
+                };
+
+                Ok(LogicalExpression::ListComprehension {
+                    variable: variable.clone(),
+                    list_expr: Box::new(list_expr),
+                    filter_expr,
+                    map_expr: Box::new(map_expr),
+                })
+            }
             ast::Expression::PatternComprehension { .. } => Err(Error::Internal(
                 "Pattern comprehension not yet supported".into(),
             )),
@@ -572,9 +973,7 @@ impl CypherTranslator {
             ast::BinaryOp::StartsWith => BinaryOp::StartsWith,
             ast::BinaryOp::EndsWith => BinaryOp::EndsWith,
             ast::BinaryOp::Contains => BinaryOp::Contains,
-            ast::BinaryOp::RegexMatch => {
-                return Err(Error::Internal("Regex match not yet supported".into()));
-            }
+            ast::BinaryOp::RegexMatch => BinaryOp::Regex,
             ast::BinaryOp::In => BinaryOp::In,
         })
     }
@@ -634,9 +1033,44 @@ impl CypherTranslator {
     }
 }
 
+/// Checks if an AST expression contains an aggregate function call.
+fn contains_aggregate(expr: &ast::Expression) -> bool {
+    match expr {
+        ast::Expression::FunctionCall { name, .. } => is_aggregate_function(name),
+        ast::Expression::Binary { left, right, .. } => {
+            contains_aggregate(left) || contains_aggregate(right)
+        }
+        ast::Expression::Unary { operand, .. } => contains_aggregate(operand),
+        _ => false,
+    }
+}
+
+/// Returns true if the function name is an aggregate function.
+fn is_aggregate_function(name: &str) -> bool {
+    matches!(
+        name.to_uppercase().as_str(),
+        "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "COLLECT"
+    )
+}
+
+/// Converts a function name to an AggregateFunction enum.
+fn to_aggregate_function(name: &str) -> Option<AggregateFunction> {
+    match name.to_uppercase().as_str() {
+        "COUNT" => Some(AggregateFunction::Count),
+        "SUM" => Some(AggregateFunction::Sum),
+        "AVG" => Some(AggregateFunction::Avg),
+        "MIN" => Some(AggregateFunction::Min),
+        "MAX" => Some(AggregateFunction::Max),
+        "COLLECT" => Some(AggregateFunction::Collect),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // === Basic MATCH Tests ===
 
     #[test]
     fn test_translate_simple_match() {
@@ -673,6 +1107,89 @@ mod tests {
     }
 
     #[test]
+    fn test_translate_match_return_distinct() {
+        let plan = translate("MATCH (n:Person) RETURN DISTINCT n.name").unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            assert!(ret.distinct);
+        } else {
+            panic!("Expected Return");
+        }
+    }
+
+    #[test]
+    fn test_translate_match_return_all() {
+        let plan = translate("MATCH (n:Person) RETURN *").unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            assert_eq!(ret.items.len(), 1);
+            if let LogicalExpression::Variable(v) = &ret.items[0].expression {
+                assert_eq!(v, "*");
+            }
+        } else {
+            panic!("Expected Return");
+        }
+    }
+
+    // === Path Pattern Tests ===
+
+    #[test]
+    fn test_translate_outgoing_relationship() {
+        let plan = translate("MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b").unwrap();
+
+        // Find the Expand operator
+        fn find_expand(op: &LogicalOperator) -> Option<&ExpandOp> {
+            match op {
+                LogicalOperator::Expand(e) => Some(e),
+                LogicalOperator::Return(r) => find_expand(&r.input),
+                LogicalOperator::Filter(f) => find_expand(&f.input),
+                _ => None,
+            }
+        }
+
+        let expand = find_expand(&plan.root).expect("Expected Expand");
+        assert_eq!(expand.direction, ExpandDirection::Outgoing);
+        assert_eq!(expand.edge_type.as_deref(), Some("KNOWS"));
+    }
+
+    #[test]
+    fn test_translate_incoming_relationship() {
+        let plan = translate("MATCH (a:Person)<-[:KNOWS]-(b:Person) RETURN a, b").unwrap();
+
+        fn find_expand(op: &LogicalOperator) -> Option<&ExpandOp> {
+            match op {
+                LogicalOperator::Expand(e) => Some(e),
+                LogicalOperator::Return(r) => find_expand(&r.input),
+                LogicalOperator::Filter(f) => find_expand(&f.input),
+                _ => None,
+            }
+        }
+
+        let expand = find_expand(&plan.root).expect("Expected Expand");
+        assert_eq!(expand.direction, ExpandDirection::Incoming);
+    }
+
+    #[test]
+    fn test_translate_variable_length_path() {
+        let plan = translate("MATCH (a:Person)-[:KNOWS*1..3]->(b:Person) RETURN a, b").unwrap();
+
+        fn find_expand(op: &LogicalOperator) -> Option<&ExpandOp> {
+            match op {
+                LogicalOperator::Expand(e) => Some(e),
+                LogicalOperator::Return(r) => find_expand(&r.input),
+                LogicalOperator::Filter(f) => find_expand(&f.input),
+                _ => None,
+            }
+        }
+
+        let expand = find_expand(&plan.root).expect("Expected Expand");
+        assert_eq!(expand.min_hops, 1);
+        assert_eq!(expand.max_hops, Some(3));
+    }
+
+    // === Mutation Tests ===
+
+    #[test]
     fn test_translate_create_node() {
         let plan = translate("CREATE (n:Person {name: 'Alice'})").unwrap();
 
@@ -683,6 +1200,414 @@ mod tests {
             assert_eq!(create.properties[0].0, "name");
         } else {
             panic!("Expected CreateNode, got {:?}", plan.root);
+        }
+    }
+
+    #[test]
+    fn test_translate_create_path() {
+        let plan = translate("CREATE (a:Person)-[:KNOWS]->(b:Person)").unwrap();
+
+        // Should have CreateEdge at root
+        if let LogicalOperator::CreateEdge(edge) = &plan.root {
+            assert_eq!(edge.edge_type, "KNOWS");
+            // Input should be CreateNode for b
+            if let LogicalOperator::CreateNode(node_b) = edge.input.as_ref() {
+                assert_eq!(node_b.variable, "b");
+            }
+        } else {
+            panic!("Expected CreateEdge, got {:?}", plan.root);
+        }
+    }
+
+    #[test]
+    fn test_translate_delete_node() {
+        let plan = translate("MATCH (n:Person) DELETE n").unwrap();
+
+        if let LogicalOperator::DeleteNode(delete) = &plan.root {
+            assert_eq!(delete.variable, "n");
+            if let LogicalOperator::NodeScan(scan) = delete.input.as_ref() {
+                assert_eq!(scan.variable, "n");
+                assert_eq!(scan.label, Some("Person".into()));
+            } else {
+                panic!("Expected NodeScan input");
+            }
+        } else {
+            panic!("Expected DeleteNode, got {:?}", plan.root);
+        }
+    }
+
+    #[test]
+    fn test_translate_set_property() {
+        let plan = translate("MATCH (n:Person) SET n.name = 'Bob' RETURN n").unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            if let LogicalOperator::SetProperty(set) = ret.input.as_ref() {
+                assert_eq!(set.variable, "n");
+                assert_eq!(set.properties.len(), 1);
+                assert_eq!(set.properties[0].0, "name");
+                assert!(!set.replace);
+            } else {
+                panic!("Expected SetProperty");
+            }
+        } else {
+            panic!("Expected Return, got {:?}", plan.root);
+        }
+    }
+
+    #[test]
+    fn test_translate_set_multiple_properties() {
+        let plan = translate("MATCH (n:Person) SET n.name = 'Alice', n.age = 30 RETURN n").unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            // SET creates chained SetProperty operators
+            if let LogicalOperator::SetProperty(set2) = ret.input.as_ref() {
+                if let LogicalOperator::SetProperty(set1) = set2.input.as_ref() {
+                    // Properties are set in order
+                    assert_eq!(set1.properties[0].0, "name");
+                    assert_eq!(set2.properties[0].0, "age");
+                } else {
+                    panic!("Expected nested SetProperty");
+                }
+            } else {
+                panic!("Expected SetProperty");
+            }
+        } else {
+            panic!("Expected Return");
+        }
+    }
+
+    #[test]
+    fn test_translate_remove_property() {
+        let plan = translate("MATCH (n:Person) REMOVE n.name RETURN n").unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            if let LogicalOperator::SetProperty(set) = ret.input.as_ref() {
+                // REMOVE property is translated to SET property = null
+                assert_eq!(set.variable, "n");
+                assert_eq!(set.properties.len(), 1);
+                assert_eq!(set.properties[0].0, "name");
+                // Value should be Null
+                if let LogicalExpression::Literal(Value::Null) = &set.properties[0].1 {
+                    // OK
+                } else {
+                    panic!("Expected Null value for REMOVE");
+                }
+            } else {
+                panic!("Expected SetProperty");
+            }
+        } else {
+            panic!("Expected Return, got {:?}", plan.root);
+        }
+    }
+
+    #[test]
+    fn test_translate_remove_label() {
+        let plan = translate("MATCH (n:Person:Admin) REMOVE n:Admin RETURN n").unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            if let LogicalOperator::RemoveLabel(remove) = ret.input.as_ref() {
+                assert_eq!(remove.variable, "n");
+                assert_eq!(remove.labels, vec!["Admin".to_string()]);
+            } else {
+                panic!("Expected RemoveLabel");
+            }
+        } else {
+            panic!("Expected Return, got {:?}", plan.root);
+        }
+    }
+
+    // === WITH, UNWIND, ORDER BY, SKIP, LIMIT Tests ===
+
+    #[test]
+    fn test_translate_with_clause() {
+        let plan = translate("MATCH (n:Person) WITH n.name AS name RETURN name").unwrap();
+
+        // Find Project operator
+        fn find_project(op: &LogicalOperator) -> Option<&ProjectOp> {
+            match op {
+                LogicalOperator::Project(p) => Some(p),
+                LogicalOperator::Return(r) => find_project(&r.input),
+                LogicalOperator::Filter(f) => find_project(&f.input),
+                _ => None,
+            }
+        }
+
+        let project = find_project(&plan.root).expect("Expected Project");
+        assert_eq!(project.projections.len(), 1);
+        assert_eq!(project.projections[0].alias.as_deref(), Some("name"));
+    }
+
+    #[test]
+    fn test_translate_with_distinct() {
+        let plan = translate("MATCH (n:Person) WITH DISTINCT n.city AS city RETURN city").unwrap();
+
+        // Find Distinct operator
+        fn find_distinct(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::Distinct(_) => true,
+                LogicalOperator::Return(r) => find_distinct(&r.input),
+                LogicalOperator::Project(p) => find_distinct(&p.input),
+                LogicalOperator::Filter(f) => find_distinct(&f.input),
+                _ => false,
+            }
+        }
+
+        assert!(find_distinct(&plan.root));
+    }
+
+    #[test]
+    fn test_translate_unwind() {
+        let plan = translate("UNWIND [1, 2, 3] AS x RETURN x").unwrap();
+
+        // Find Unwind operator
+        fn find_unwind(op: &LogicalOperator) -> Option<&UnwindOp> {
+            match op {
+                LogicalOperator::Unwind(u) => Some(u),
+                LogicalOperator::Return(r) => find_unwind(&r.input),
+                _ => None,
+            }
+        }
+
+        let unwind = find_unwind(&plan.root).expect("Expected Unwind");
+        assert_eq!(unwind.variable, "x");
+    }
+
+    #[test]
+    fn test_translate_order_by() {
+        let plan = translate("MATCH (n:Person) RETURN n ORDER BY n.name").unwrap();
+
+        fn find_sort(op: &LogicalOperator) -> Option<&SortOp> {
+            match op {
+                LogicalOperator::Sort(s) => Some(s),
+                LogicalOperator::Return(r) => find_sort(&r.input),
+                _ => None,
+            }
+        }
+
+        let sort = find_sort(&plan.root).expect("Expected Sort");
+        assert_eq!(sort.keys.len(), 1);
+        assert_eq!(sort.keys[0].order, SortOrder::Ascending);
+    }
+
+    #[test]
+    fn test_translate_order_by_desc() {
+        let plan = translate("MATCH (n:Person) RETURN n ORDER BY n.age DESC").unwrap();
+
+        fn find_sort(op: &LogicalOperator) -> Option<&SortOp> {
+            match op {
+                LogicalOperator::Sort(s) => Some(s),
+                LogicalOperator::Return(r) => find_sort(&r.input),
+                _ => None,
+            }
+        }
+
+        let sort = find_sort(&plan.root).expect("Expected Sort");
+        assert_eq!(sort.keys[0].order, SortOrder::Descending);
+    }
+
+    #[test]
+    fn test_translate_limit() {
+        let plan = translate("MATCH (n:Person) RETURN n LIMIT 10").unwrap();
+
+        fn find_limit(op: &LogicalOperator) -> Option<&LimitOp> {
+            match op {
+                LogicalOperator::Limit(l) => Some(l),
+                LogicalOperator::Return(r) => find_limit(&r.input),
+                _ => None,
+            }
+        }
+
+        let limit = find_limit(&plan.root).expect("Expected Limit");
+        assert_eq!(limit.count, 10);
+    }
+
+    #[test]
+    fn test_translate_skip() {
+        let plan = translate("MATCH (n:Person) RETURN n SKIP 5").unwrap();
+
+        fn find_skip(op: &LogicalOperator) -> Option<&SkipOp> {
+            match op {
+                LogicalOperator::Skip(s) => Some(s),
+                LogicalOperator::Return(r) => find_skip(&r.input),
+                LogicalOperator::Limit(l) => find_skip(&l.input),
+                _ => None,
+            }
+        }
+
+        let skip = find_skip(&plan.root).expect("Expected Skip");
+        assert_eq!(skip.count, 5);
+    }
+
+    // === MERGE Tests ===
+
+    #[test]
+    fn test_translate_merge() {
+        let plan = translate("MERGE (n:Person {name: 'Alice'})").unwrap();
+
+        if let LogicalOperator::Merge(merge) = &plan.root {
+            assert_eq!(merge.variable, "n");
+            assert_eq!(merge.labels, vec!["Person".to_string()]);
+            assert_eq!(merge.match_properties.len(), 1);
+            assert_eq!(merge.match_properties[0].0, "name");
+        } else {
+            panic!("Expected Merge, got {:?}", plan.root);
+        }
+    }
+
+    #[test]
+    fn test_translate_merge_on_create() {
+        let plan = translate("MERGE (n:Person {name: 'Alice'}) ON CREATE SET n.created = true").unwrap();
+
+        if let LogicalOperator::Merge(merge) = &plan.root {
+            assert_eq!(merge.on_create.len(), 1);
+            assert_eq!(merge.on_create[0].0, "created");
+        } else {
+            panic!("Expected Merge, got {:?}", plan.root);
+        }
+    }
+
+    // === Expression Tests ===
+
+    #[test]
+    fn test_translate_list_expression() {
+        // Cypher requires MATCH before RETURN, so use UNWIND to test list
+        let plan = translate("UNWIND [1, 2, 3] AS x RETURN x").unwrap();
+
+        fn find_unwind(op: &LogicalOperator) -> Option<&UnwindOp> {
+            match op {
+                LogicalOperator::Unwind(u) => Some(u),
+                LogicalOperator::Return(r) => find_unwind(&r.input),
+                _ => None,
+            }
+        }
+
+        let unwind = find_unwind(&plan.root).expect("Expected Unwind");
+        if let LogicalExpression::List(items) = &unwind.expression {
+            assert_eq!(items.len(), 3);
+        } else {
+            panic!("Expected List expression");
+        }
+    }
+
+    #[test]
+    fn test_translate_map_expression() {
+        // Test map in CREATE with properties
+        let plan = translate("CREATE (n:Person {name: 'Alice', age: 30})").unwrap();
+
+        if let LogicalOperator::CreateNode(create) = &plan.root {
+            assert_eq!(create.properties.len(), 2);
+        } else {
+            panic!("Expected CreateNode");
+        }
+    }
+
+    #[test]
+    fn test_translate_function_call() {
+        // Use toUpper which is a simple function
+        let plan = translate("MATCH (n:Person) RETURN toUpper(n.name)").unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            if let LogicalExpression::FunctionCall { name, args } = &ret.items[0].expression {
+                assert_eq!(name.to_lowercase(), "toupper");
+                assert_eq!(args.len(), 1);
+            } else {
+                panic!("Expected FunctionCall, got {:?}", ret.items[0].expression);
+            }
+        } else {
+            panic!("Expected Return");
+        }
+    }
+
+    #[test]
+    fn test_translate_case_expression() {
+        let plan = translate("MATCH (n:Person) RETURN CASE WHEN n.age > 18 THEN 'adult' ELSE 'minor' END").unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            if let LogicalExpression::Case { when_clauses, else_clause, .. } = &ret.items[0].expression {
+                assert_eq!(when_clauses.len(), 1);
+                assert!(else_clause.is_some());
+            } else {
+                panic!("Expected Case expression");
+            }
+        } else {
+            panic!("Expected Return");
+        }
+    }
+
+    #[test]
+    fn test_translate_parameter() {
+        let plan = translate("MATCH (n:Person) WHERE n.name = $name RETURN n").unwrap();
+
+        fn find_filter(op: &LogicalOperator) -> Option<&FilterOp> {
+            match op {
+                LogicalOperator::Filter(f) => Some(f),
+                LogicalOperator::Return(r) => find_filter(&r.input),
+                _ => None,
+            }
+        }
+
+        let filter = find_filter(&plan.root).expect("Expected Filter");
+        if let LogicalExpression::Binary { right, .. } = &filter.predicate {
+            if let LogicalExpression::Parameter(p) = right.as_ref() {
+                assert_eq!(p, "name");
+            } else {
+                panic!("Expected Parameter");
+            }
+        }
+    }
+
+    // === Error Handling Tests ===
+
+    #[test]
+    fn test_translate_binary_op_all() {
+        let translator = CypherTranslator::new();
+
+        // Test all supported binary ops
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Eq).unwrap(), BinaryOp::Eq);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Ne).unwrap(), BinaryOp::Ne);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Lt).unwrap(), BinaryOp::Lt);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Le).unwrap(), BinaryOp::Le);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Gt).unwrap(), BinaryOp::Gt);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Ge).unwrap(), BinaryOp::Ge);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::And).unwrap(), BinaryOp::And);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Or).unwrap(), BinaryOp::Or);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Xor).unwrap(), BinaryOp::Xor);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Add).unwrap(), BinaryOp::Add);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Sub).unwrap(), BinaryOp::Sub);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Mul).unwrap(), BinaryOp::Mul);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Div).unwrap(), BinaryOp::Div);
+        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Mod).unwrap(), BinaryOp::Mod);
+    }
+
+    #[test]
+    fn test_translate_unary_op_all() {
+        let translator = CypherTranslator::new();
+
+        assert_eq!(translator.translate_unary_op(&ast::UnaryOp::Not).unwrap(), UnaryOp::Not);
+        assert_eq!(translator.translate_unary_op(&ast::UnaryOp::Neg).unwrap(), UnaryOp::Neg);
+        assert_eq!(translator.translate_unary_op(&ast::UnaryOp::IsNull).unwrap(), UnaryOp::IsNull);
+        assert_eq!(translator.translate_unary_op(&ast::UnaryOp::IsNotNull).unwrap(), UnaryOp::IsNotNull);
+    }
+
+    #[test]
+    fn test_translate_literal_types() {
+        let translator = CypherTranslator::new();
+
+        // Test all literal types
+        let null_lit = translator.translate_literal(&ast::Literal::Null).unwrap();
+        assert!(matches!(null_lit, LogicalExpression::Literal(Value::Null)));
+
+        let bool_lit = translator.translate_literal(&ast::Literal::Bool(true)).unwrap();
+        assert!(matches!(bool_lit, LogicalExpression::Literal(Value::Bool(true))));
+
+        let int_lit = translator.translate_literal(&ast::Literal::Integer(42)).unwrap();
+        assert!(matches!(int_lit, LogicalExpression::Literal(Value::Int64(42))));
+
+        let float_lit = translator.translate_literal(&ast::Literal::Float(3.14)).unwrap();
+        if let LogicalExpression::Literal(Value::Float64(f)) = float_lit {
+            assert!((f - 3.14).abs() < 0.001);
+        } else {
+            panic!("Expected Float64");
         }
     }
 }

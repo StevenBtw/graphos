@@ -9,6 +9,7 @@
 //!
 //! - [`types`] - Core type definitions (NodeId, EdgeId, Value, etc.)
 //! - [`memory`] - Memory allocators (arena, bump, pool)
+//! - [`mvcc`] - MVCC primitives (VersionChain, VersionInfo)
 //! - [`utils`] - Utility functions and helpers (hashing, errors)
 
 #![warn(missing_docs)]
@@ -16,9 +17,11 @@
 #![warn(clippy::pedantic)]
 
 pub mod memory;
+pub mod mvcc;
 pub mod types;
 pub mod utils;
 
 // Re-export commonly used types at crate root
+pub use mvcc::{Version, VersionChain, VersionInfo};
 pub use types::{EdgeId, EpochId, LogicalType, NodeId, PropertyKey, Timestamp, TxId, Value};
 pub use utils::error::{Error, Result};

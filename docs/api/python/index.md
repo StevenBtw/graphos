@@ -10,7 +10,7 @@ Complete reference for the `pygraphos` Python package.
 ## Installation
 
 ```bash
-pip install pygraphos
+uv add pygraphos
 ```
 
 ## Quick Start

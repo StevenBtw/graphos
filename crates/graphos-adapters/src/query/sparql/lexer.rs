@@ -729,8 +729,9 @@ impl<'a> Lexer<'a> {
             "TRUE" => TokenKind::True,
             "FALSE" => TokenKind::False,
             "UNDEF" => TokenKind::Undef,
-            // Special: 'a' is shorthand for rdf:type (case-sensitive!)
-            "a" => TokenKind::A,
+            // Special: 'a' is shorthand for rdf:type
+            // Note: This gets uppercased to "A" by keyword_or_identifier
+            "A" => TokenKind::A,
             _ => TokenKind::PrefixedName, // Treat as prefixed name without colon (just prefix part)
         }
     }

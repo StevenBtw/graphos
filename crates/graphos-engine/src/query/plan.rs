@@ -68,6 +68,15 @@ pub enum LogicalOperator {
     /// Delete an edge.
     DeleteEdge(DeleteEdgeOp),
 
+    /// Set properties on a node or edge.
+    SetProperty(SetPropertyOp),
+
+    /// Add labels to a node.
+    AddLabel(AddLabelOp),
+
+    /// Remove labels from a node.
+    RemoveLabel(RemoveLabelOp),
+
     /// Return results (terminal operator).
     Return(ReturnOp),
 
@@ -90,6 +99,12 @@ pub enum LogicalOperator {
 
     /// Bind a variable to an expression.
     Bind(BindOp),
+
+    /// Unwind a list into individual rows.
+    Unwind(UnwindOp),
+
+    /// Merge a pattern (match or create).
+    Merge(MergeOp),
 }
 
 /// Scan nodes from the graph.
@@ -355,6 +370,41 @@ pub struct DeleteEdgeOp {
     pub input: Box<LogicalOperator>,
 }
 
+/// Set properties on a node or edge.
+#[derive(Debug, Clone)]
+pub struct SetPropertyOp {
+    /// Variable of the entity to update.
+    pub variable: String,
+    /// Properties to set (name -> expression).
+    pub properties: Vec<(String, LogicalExpression)>,
+    /// Whether to replace all properties (vs. merge).
+    pub replace: bool,
+    /// Input operator.
+    pub input: Box<LogicalOperator>,
+}
+
+/// Add labels to a node.
+#[derive(Debug, Clone)]
+pub struct AddLabelOp {
+    /// Variable of the node to update.
+    pub variable: String,
+    /// Labels to add.
+    pub labels: Vec<String>,
+    /// Input operator.
+    pub input: Box<LogicalOperator>,
+}
+
+/// Remove labels from a node.
+#[derive(Debug, Clone)]
+pub struct RemoveLabelOp {
+    /// Variable of the node to update.
+    pub variable: String,
+    /// Labels to remove.
+    pub labels: Vec<String>,
+    /// Input operator.
+    pub input: Box<LogicalOperator>,
+}
+
 // ==================== RDF/SPARQL Operators ====================
 
 /// Scan RDF triples matching a pattern.
@@ -417,6 +467,41 @@ pub struct BindOp {
     pub expression: LogicalExpression,
     /// Variable to bind the result to.
     pub variable: String,
+    /// Input operator.
+    pub input: Box<LogicalOperator>,
+}
+
+/// Unwind a list into individual rows.
+///
+/// For each input row, evaluates the expression (which should return a list)
+/// and emits one row for each element in the list.
+#[derive(Debug, Clone)]
+pub struct UnwindOp {
+    /// The list expression to unwind.
+    pub expression: LogicalExpression,
+    /// The variable name for each element.
+    pub variable: String,
+    /// Input operator.
+    pub input: Box<LogicalOperator>,
+}
+
+/// Merge a pattern (match or create).
+///
+/// MERGE tries to match a pattern in the graph. If found, returns the existing
+/// elements (optionally applying ON MATCH SET). If not found, creates the pattern
+/// (optionally applying ON CREATE SET).
+#[derive(Debug, Clone)]
+pub struct MergeOp {
+    /// The node to merge.
+    pub variable: String,
+    /// Labels to match/create.
+    pub labels: Vec<String>,
+    /// Properties that must match (used for both matching and creation).
+    pub match_properties: Vec<(String, LogicalExpression)>,
+    /// Properties to set on CREATE.
+    pub on_create: Vec<(String, LogicalExpression)>,
+    /// Properties to set on MATCH.
+    pub on_match: Vec<(String, LogicalExpression)>,
     /// Input operator.
     pub input: Box<LogicalOperator>,
 }
@@ -487,6 +572,27 @@ pub enum LogicalExpression {
     /// List literal.
     List(Vec<LogicalExpression>),
 
+    /// Map literal (e.g., {name: 'Alice', age: 30}).
+    Map(Vec<(String, LogicalExpression)>),
+
+    /// Index access (e.g., list[0]).
+    IndexAccess {
+        /// The base expression (typically a list or string).
+        base: Box<LogicalExpression>,
+        /// The index expression.
+        index: Box<LogicalExpression>,
+    },
+
+    /// Slice access (e.g., list[1..3]).
+    SliceAccess {
+        /// The base expression (typically a list or string).
+        base: Box<LogicalExpression>,
+        /// Start index (None means from beginning).
+        start: Option<Box<LogicalExpression>>,
+        /// End index (None means to end).
+        end: Option<Box<LogicalExpression>>,
+    },
+
     /// CASE expression.
     Case {
         /// Test expression (for simple CASE).
@@ -508,6 +614,24 @@ pub enum LogicalExpression {
 
     /// ID of a node or edge.
     Id(String),
+
+    /// List comprehension: [x IN list WHERE predicate | expression]
+    ListComprehension {
+        /// Variable name for each element.
+        variable: String,
+        /// The source list expression.
+        list_expr: Box<LogicalExpression>,
+        /// Optional filter predicate.
+        filter_expr: Option<Box<LogicalExpression>>,
+        /// The mapping expression for each element.
+        map_expr: Box<LogicalExpression>,
+    },
+
+    /// EXISTS subquery.
+    ExistsSubquery(Box<LogicalOperator>),
+
+    /// COUNT subquery.
+    CountSubquery(Box<LogicalOperator>),
 }
 
 /// Binary operator.
@@ -557,6 +681,10 @@ pub enum BinaryOp {
     In,
     /// Pattern matching (LIKE).
     Like,
+    /// Regex matching (=~).
+    Regex,
+    /// Power/exponentiation (^).
+    Pow,
 }
 
 /// Unary operator.

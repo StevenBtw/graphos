@@ -11,8 +11,9 @@
 //! - Scalar fields → Return projections
 
 use crate::query::plan::{
-    BinaryOp, ExpandDirection, ExpandOp, FilterOp, LogicalExpression, LogicalOperator,
-    LogicalPlan, NodeScanOp, ReturnItem, ReturnOp,
+    BinaryOp, CreateNodeOp, DeleteNodeOp, ExpandDirection, ExpandOp, FilterOp, LimitOp,
+    LogicalExpression, LogicalOperator, LogicalPlan, NodeScanOp, ReturnItem, ReturnOp,
+    SetPropertyOp, SkipOp, SortKey, SortOp, SortOrder,
 };
 use graphos_adapters::query::graphql::{self, ast};
 use graphos_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
@@ -28,6 +29,26 @@ pub fn translate(query: &str) -> Result<LogicalPlan> {
     let doc = graphql::parse(query)?;
     let translator = GraphQLTranslator::new();
     translator.translate_document(&doc)
+}
+
+/// Mutation type for GraphQL mutations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MutationType {
+    Create,
+    Update,
+    Delete,
+}
+
+/// Extracted special arguments from a field.
+struct ExtractedArgs<'a> {
+    /// Pagination: first (limit)
+    first: Option<usize>,
+    /// Pagination: skip (offset)
+    skip: Option<usize>,
+    /// Sort keys from orderBy
+    order_by: Option<Vec<SortKey>>,
+    /// Remaining filter arguments
+    filters: Vec<&'a ast::Argument>,
 }
 
 /// Translator from GraphQL AST to LogicalPlan.
@@ -65,14 +86,6 @@ impl GraphQLTranslator {
             })
             .ok_or_else(|| Error::Query(QueryError::new(QueryErrorKind::Syntax, "No operation found in document")))?;
 
-        // Only Query operations are supported for LPG
-        if operation.operation != ast::OperationType::Query {
-            return Err(Error::Query(QueryError::new(
-                QueryErrorKind::Semantic,
-                "Only Query operations are supported for LPG",
-            )));
-        }
-
         // Create translator with fragments
         let translator = GraphQLTranslator {
             var_counter: AtomicU32::new(0),
@@ -83,16 +96,225 @@ impl GraphQLTranslator {
     }
 
     fn translate_operation(&self, op: &ast::OperationDefinition) -> Result<LogicalPlan> {
-        // Each field in the root selection set is a separate query
-        // For now, we only support a single root field
+        match op.operation {
+            ast::OperationType::Query => self.translate_query(op),
+            ast::OperationType::Mutation => self.translate_mutation(op),
+            ast::OperationType::Subscription => Err(Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "Subscriptions are not supported",
+            ))),
+        }
+    }
+
+    fn translate_query(&self, op: &ast::OperationDefinition) -> Result<LogicalPlan> {
         let selections = &op.selection_set.selections;
         if selections.is_empty() {
-            return Err(Error::Query(QueryError::new(QueryErrorKind::Syntax, "Empty selection set")));
+            return Err(Error::Query(QueryError::new(
+                QueryErrorKind::Syntax,
+                "Empty selection set",
+            )));
         }
 
         // Get the first field
         let field = self.get_first_field(&op.selection_set)?;
         let plan = self.translate_root_field(field)?;
+
+        Ok(LogicalPlan::new(plan))
+    }
+
+    fn translate_mutation(&self, op: &ast::OperationDefinition) -> Result<LogicalPlan> {
+        let field = self.get_first_field(&op.selection_set)?;
+
+        // Parse mutation type from field name
+        let (mutation_type, type_name) = self.parse_mutation_name(&field.name)?;
+
+        match mutation_type {
+            MutationType::Create => self.translate_create_mutation(field, &type_name),
+            MutationType::Update => self.translate_update_mutation(field, &type_name),
+            MutationType::Delete => self.translate_delete_mutation(field, &type_name),
+        }
+    }
+
+    fn parse_mutation_name(&self, name: &str) -> Result<(MutationType, String)> {
+        if let Some(type_name) = name.strip_prefix("create") {
+            Ok((MutationType::Create, type_name.to_string()))
+        } else if let Some(type_name) = name.strip_prefix("update") {
+            Ok((MutationType::Update, type_name.to_string()))
+        } else if let Some(type_name) = name.strip_prefix("delete") {
+            Ok((MutationType::Delete, type_name.to_string()))
+        } else {
+            Err(Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                &format!("Unknown mutation: {}. Expected createX, updateX, or deleteX", name),
+            )))
+        }
+    }
+
+    fn translate_create_mutation(
+        &self,
+        field: &ast::Field,
+        type_name: &str,
+    ) -> Result<LogicalPlan> {
+        let var = self.next_var();
+
+        // Convert arguments to properties
+        let properties: Vec<(String, LogicalExpression)> = field
+            .arguments
+            .iter()
+            .map(|arg| {
+                (
+                    arg.name.clone(),
+                    LogicalExpression::Literal(arg.value.to_value()),
+                )
+            })
+            .collect();
+
+        let mut plan = LogicalOperator::CreateNode(CreateNodeOp {
+            variable: var.clone(),
+            labels: vec![self.capitalize_first(type_name)],
+            properties,
+            input: None,
+        });
+
+        // If there's a selection set, return the created node's properties
+        plan = if let Some(selection_set) = &field.selection_set {
+            self.translate_selection_set(selection_set, plan, &var)?
+        } else {
+            LogicalOperator::Return(ReturnOp {
+                items: vec![ReturnItem {
+                    expression: LogicalExpression::Variable(var),
+                    alias: None,
+                }],
+                distinct: false,
+                input: Box::new(plan),
+            })
+        };
+
+        Ok(LogicalPlan::new(plan))
+    }
+
+    fn translate_update_mutation(
+        &self,
+        field: &ast::Field,
+        type_name: &str,
+    ) -> Result<LogicalPlan> {
+        let var = self.next_var();
+
+        // Find the id argument (required for update)
+        let id_arg = field
+            .arguments
+            .iter()
+            .find(|arg| arg.name == "id")
+            .ok_or_else(|| {
+                Error::Query(QueryError::new(
+                    QueryErrorKind::Semantic,
+                    "Update mutation requires an 'id' argument",
+                ))
+            })?;
+
+        // Collect properties to update (all arguments except 'id')
+        let properties: Vec<(String, LogicalExpression)> = field
+            .arguments
+            .iter()
+            .filter(|arg| arg.name != "id")
+            .map(|arg| {
+                (
+                    arg.name.clone(),
+                    LogicalExpression::Literal(arg.value.to_value()),
+                )
+            })
+            .collect();
+
+        if properties.is_empty() {
+            return Err(Error::Query(QueryError::new(
+                QueryErrorKind::Semantic,
+                "Update mutation requires at least one property to update",
+            )));
+        }
+
+        // Start with a node scan for the type
+        let mut plan = LogicalOperator::NodeScan(NodeScanOp {
+            variable: var.clone(),
+            label: Some(self.capitalize_first(type_name)),
+            input: None,
+        });
+
+        // Filter by id
+        plan = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Id(var.clone())),
+                op: BinaryOp::Eq,
+                right: Box::new(LogicalExpression::Literal(id_arg.value.to_value())),
+            },
+            input: Box::new(plan),
+        });
+
+        // Set the properties
+        plan = LogicalOperator::SetProperty(SetPropertyOp {
+            variable: var.clone(),
+            properties,
+            replace: false, // Merge properties, don't replace all
+            input: Box::new(plan),
+        });
+
+        // If there's a selection set, return the updated node's properties
+        plan = if let Some(selection_set) = &field.selection_set {
+            self.translate_selection_set(selection_set, plan, &var)?
+        } else {
+            LogicalOperator::Return(ReturnOp {
+                items: vec![ReturnItem {
+                    expression: LogicalExpression::Variable(var),
+                    alias: None,
+                }],
+                distinct: false,
+                input: Box::new(plan),
+            })
+        };
+
+        Ok(LogicalPlan::new(plan))
+    }
+
+    fn translate_delete_mutation(
+        &self,
+        field: &ast::Field,
+        type_name: &str,
+    ) -> Result<LogicalPlan> {
+        let var = self.next_var();
+
+        // Find the id argument
+        let id_arg = field
+            .arguments
+            .iter()
+            .find(|arg| arg.name == "id")
+            .ok_or_else(|| {
+                Error::Query(QueryError::new(
+                    QueryErrorKind::Semantic,
+                    "Delete mutation requires an 'id' argument",
+                ))
+            })?;
+
+        // First scan for the node
+        let mut plan = LogicalOperator::NodeScan(NodeScanOp {
+            variable: var.clone(),
+            label: Some(self.capitalize_first(type_name)),
+            input: None,
+        });
+
+        // Filter by id
+        plan = LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Id(var.clone())),
+                op: BinaryOp::Eq,
+                right: Box::new(LogicalExpression::Literal(id_arg.value.to_value())),
+            },
+            input: Box::new(plan),
+        });
+
+        // Delete the node
+        plan = LogicalOperator::DeleteNode(DeleteNodeOp {
+            variable: var,
+            input: Box::new(plan),
+        });
 
         Ok(LogicalPlan::new(plan))
     }
@@ -108,9 +330,12 @@ impl GraphQLTranslator {
             input: None,
         });
 
-        // Apply argument filters
-        if !field.arguments.is_empty() {
-            let filter = self.translate_arguments(&field.arguments, &var)?;
+        // Extract special arguments (pagination, orderBy) from regular filters
+        let extracted = self.extract_special_args(&field.arguments, &var);
+
+        // Apply filters (excluding pagination and orderBy)
+        if !extracted.filters.is_empty() {
+            let filter = self.translate_filter_arguments(&extracted.filters, &var)?;
             plan = LogicalOperator::Filter(FilterOp {
                 predicate: filter,
                 input: Box::new(plan),
@@ -132,7 +357,89 @@ impl GraphQLTranslator {
             });
         }
 
+        // Apply ordering (before pagination)
+        if let Some(keys) = extracted.order_by {
+            plan = LogicalOperator::Sort(SortOp {
+                keys,
+                input: Box::new(plan),
+            });
+        }
+
+        // Apply skip BEFORE limit
+        if let Some(count) = extracted.skip {
+            plan = LogicalOperator::Skip(SkipOp {
+                count,
+                input: Box::new(plan),
+            });
+        }
+
+        // Apply limit
+        if let Some(count) = extracted.first {
+            plan = LogicalOperator::Limit(LimitOp {
+                count,
+                input: Box::new(plan),
+            });
+        }
+
         Ok(plan)
+    }
+
+    /// Extracts special arguments (first, skip, orderBy) from field arguments.
+    fn extract_special_args<'a>(
+        &self,
+        args: &'a [ast::Argument],
+        var: &str,
+    ) -> ExtractedArgs<'a> {
+        let mut first = None;
+        let mut skip = None;
+        let mut order_by = None;
+        let mut filters = Vec::new();
+
+        for arg in args {
+            match arg.name.as_str() {
+                "first" | "limit" => {
+                    if let ast::InputValue::Int(n) = &arg.value {
+                        first = Some(*n as usize);
+                    }
+                }
+                "skip" | "offset" => {
+                    if let ast::InputValue::Int(n) = &arg.value {
+                        skip = Some(*n as usize);
+                    }
+                }
+                "orderBy" => {
+                    if let ast::InputValue::Object(fields) = &arg.value {
+                        let keys: Vec<SortKey> = fields
+                            .iter()
+                            .map(|(field, dir)| {
+                                let order = match dir {
+                                    ast::InputValue::Enum(s) if s == "DESC" => {
+                                        SortOrder::Descending
+                                    }
+                                    _ => SortOrder::Ascending,
+                                };
+                                SortKey {
+                                    expression: LogicalExpression::Property {
+                                        variable: var.to_string(),
+                                        property: field.clone(),
+                                    },
+                                    order,
+                                }
+                            })
+                            .collect();
+                        order_by = Some(keys);
+                    }
+                }
+                _ => filters.push(arg),
+            }
+        }
+
+        ExtractedArgs {
+            first,
+            skip,
+            order_by,
+            filters,
+        }
     }
 
     fn translate_selection_set(
@@ -256,39 +563,112 @@ impl GraphQLTranslator {
         Ok((plan, to_var))
     }
 
-    fn translate_arguments(
+    /// Translates filter arguments to a predicate expression.
+    /// Supports:
+    /// - Direct arguments: `name: "Alice"` → `name = "Alice"`
+    /// - Where clause: `where: { age_gt: 30 }` → `age > 30`
+    /// - Operator suffixes: `_gt`, `_gte`, `_lt`, `_lte`, `_ne`, `_contains`, `_starts_with`, `_ends_with`, `_in`
+    fn translate_filter_arguments(
         &self,
-        args: &[ast::Argument],
+        args: &[&ast::Argument],
         var: &str,
     ) -> Result<LogicalExpression> {
         let mut predicates = Vec::new();
 
         for arg in args {
-            let prop = LogicalExpression::Property {
-                variable: var.to_string(),
-                property: arg.name.clone(),
-            };
-            let value = LogicalExpression::Literal(arg.value.to_value());
-
-            predicates.push(LogicalExpression::Binary {
-                left: Box::new(prop),
-                op: BinaryOp::Eq,
-                right: Box::new(value),
-            });
+            // Check for "where" argument with nested object
+            if arg.name == "where" {
+                if let ast::InputValue::Object(fields) = &arg.value {
+                    for (field_name, value) in fields {
+                        let (property, op) = self.parse_field_operator(field_name);
+                        let prop = LogicalExpression::Property {
+                            variable: var.to_string(),
+                            property,
+                        };
+                        let val = LogicalExpression::Literal(self.input_value_to_value(value));
+                        predicates.push(LogicalExpression::Binary {
+                            left: Box::new(prop),
+                            op,
+                            right: Box::new(val),
+                        });
+                    }
+                }
+            } else {
+                // Direct argument (legacy behavior): name: "Alice" → name = "Alice"
+                let prop = LogicalExpression::Property {
+                    variable: var.to_string(),
+                    property: arg.name.clone(),
+                };
+                let value = LogicalExpression::Literal(arg.value.to_value());
+                predicates.push(LogicalExpression::Binary {
+                    left: Box::new(prop),
+                    op: BinaryOp::Eq,
+                    right: Box::new(value),
+                });
+            }
         }
 
-        // Combine with AND
-        let mut result = predicates
-            .pop()
-            .ok_or_else(|| Error::Internal("No arguments".to_string()))?;
+        self.combine_with_and(predicates)
+    }
 
-        for pred in predicates.into_iter().rev() {
-            result = LogicalExpression::Binary {
-                left: Box::new(pred),
+    /// Legacy translate_arguments for nested fields (still uses simple equality).
+    fn translate_arguments(
+        &self,
+        args: &[ast::Argument],
+        var: &str,
+    ) -> Result<LogicalExpression> {
+        let refs: Vec<&ast::Argument> = args.iter().collect();
+        self.translate_filter_arguments(&refs, var)
+    }
+
+    /// Parses a field name with optional operator suffix.
+    /// Returns (property_name, operator).
+    fn parse_field_operator(&self, field: &str) -> (String, BinaryOp) {
+        // Check suffixes in order of length (longest first to avoid partial matches)
+        let suffixes = [
+            ("_starts_with", BinaryOp::StartsWith),
+            ("_ends_with", BinaryOp::EndsWith),
+            ("_contains", BinaryOp::Contains),
+            ("_gte", BinaryOp::Ge),
+            ("_lte", BinaryOp::Le),
+            ("_gt", BinaryOp::Gt),
+            ("_lt", BinaryOp::Lt),
+            ("_ne", BinaryOp::Ne),
+            ("_in", BinaryOp::In),
+        ];
+
+        for (suffix, op) in suffixes {
+            if field.ends_with(suffix) {
+                let property = field[..field.len() - suffix.len()].to_string();
+                return (property, op);
+            }
+        }
+
+        (field.to_string(), BinaryOp::Eq)
+    }
+
+    /// Converts an InputValue to a Value.
+    fn input_value_to_value(&self, input: &ast::InputValue) -> graphos_common::types::Value {
+        input.to_value()
+    }
+
+    /// Combines predicates with AND.
+    fn combine_with_and(
+        &self,
+        predicates: Vec<LogicalExpression>,
+    ) -> Result<LogicalExpression> {
+        if predicates.is_empty() {
+            return Err(Error::Internal("No predicates".to_string()));
+        }
+
+        let result = predicates
+            .into_iter()
+            .reduce(|acc, pred| LogicalExpression::Binary {
+                left: Box::new(acc),
                 op: BinaryOp::And,
-                right: Box::new(result),
-            };
-        }
+                right: Box::new(pred),
+            })
+            .unwrap();
 
         Ok(result)
     }
@@ -300,7 +680,6 @@ impl GraphQLTranslator {
         current_var: &str,
     ) -> Result<(LogicalOperator, Vec<ReturnItem>)> {
         let mut return_items = Vec::new();
-        let mut plan = input;
 
         for selection in &frag.selection_set.selections {
             if let ast::Selection::Field(field) = selection {
@@ -318,7 +697,7 @@ impl GraphQLTranslator {
             }
         }
 
-        Ok((plan, return_items))
+        Ok((input, return_items))
     }
 
     fn process_inline_selections(
@@ -454,15 +833,257 @@ mod tests {
         }
     }
 
+    // ==================== Pagination Tests ====================
+
     #[test]
-    fn test_reject_mutation() {
-        let query = r#"
-            mutation {
-                createUser(name: "Alice") {
-                    id
-                }
+    fn test_pagination_first() {
+        let query = r#"{ user(first: 10) { name } }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        // Should contain Limit with count 10
+        fn find_limit(op: &LogicalOperator) -> Option<usize> {
+            match op {
+                LogicalOperator::Limit(l) => Some(l.count),
+                LogicalOperator::Return(r) => find_limit(&r.input),
+                LogicalOperator::Filter(f) => find_limit(&f.input),
+                LogicalOperator::Sort(s) => find_limit(&s.input),
+                LogicalOperator::Skip(s) => find_limit(&s.input),
+                _ => None,
             }
-        "#;
+        }
+        assert_eq!(find_limit(&plan.root), Some(10));
+    }
+
+    #[test]
+    fn test_pagination_skip() {
+        let query = r#"{ user(skip: 5) { name } }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        // Should contain Skip with count 5
+        fn find_skip(op: &LogicalOperator) -> Option<usize> {
+            match op {
+                LogicalOperator::Skip(s) => Some(s.count),
+                LogicalOperator::Return(r) => find_skip(&r.input),
+                LogicalOperator::Filter(f) => find_skip(&f.input),
+                LogicalOperator::Limit(l) => find_skip(&l.input),
+                _ => None,
+            }
+        }
+        assert_eq!(find_skip(&plan.root), Some(5));
+    }
+
+    #[test]
+    fn test_pagination_first_and_skip() {
+        let query = r#"{ user(first: 10, skip: 5) { name } }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        // Should have Limit(Skip(...))
+        if let LogicalOperator::Limit(limit) = &plan.root {
+            assert_eq!(limit.count, 10);
+            if let LogicalOperator::Skip(skip) = limit.input.as_ref() {
+                assert_eq!(skip.count, 5);
+            } else {
+                panic!("Expected Skip inside Limit");
+            }
+        } else {
+            panic!("Expected Limit at root");
+        }
+    }
+
+    // ==================== Ordering Tests ====================
+
+    #[test]
+    fn test_order_by_single() {
+        let query = r#"{ user(orderBy: { name: ASC }) { name } }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        // Should contain Sort
+        fn find_sort(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::Sort(_) => true,
+                LogicalOperator::Return(r) => find_sort(&r.input),
+                LogicalOperator::Limit(l) => find_sort(&l.input),
+                LogicalOperator::Skip(s) => find_sort(&s.input),
+                _ => false,
+            }
+        }
+        assert!(find_sort(&plan.root));
+    }
+
+    #[test]
+    fn test_order_by_desc() {
+        let query = r#"{ user(orderBy: { age: DESC }) { name } }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_sort_order(op: &LogicalOperator) -> Option<SortOrder> {
+            match op {
+                LogicalOperator::Sort(s) => s.keys.first().map(|k| k.order),
+                LogicalOperator::Return(r) => find_sort_order(&r.input),
+                LogicalOperator::Limit(l) => find_sort_order(&l.input),
+                _ => None,
+            }
+        }
+        assert_eq!(find_sort_order(&plan.root), Some(SortOrder::Descending));
+    }
+
+    // ==================== Where Operator Tests ====================
+
+    #[test]
+    fn test_where_gt() {
+        let query = r#"{ user(where: { age_gt: 30 }) { name } }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_filter_op(op: &LogicalOperator) -> Option<BinaryOp> {
+            match op {
+                LogicalOperator::Filter(f) => {
+                    if let LogicalExpression::Binary { op, .. } = &f.predicate {
+                        Some(*op)
+                    } else {
+                        None
+                    }
+                }
+                LogicalOperator::Return(r) => find_filter_op(&r.input),
+                LogicalOperator::Sort(s) => find_filter_op(&s.input),
+                LogicalOperator::Limit(l) => find_filter_op(&l.input),
+                _ => None,
+            }
+        }
+        assert_eq!(find_filter_op(&plan.root), Some(BinaryOp::Gt));
+    }
+
+    #[test]
+    fn test_where_contains() {
+        let query = r#"{ user(where: { name_contains: "Ali" }) { name } }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_filter_op(op: &LogicalOperator) -> Option<BinaryOp> {
+            match op {
+                LogicalOperator::Filter(f) => {
+                    if let LogicalExpression::Binary { op, .. } = &f.predicate {
+                        Some(*op)
+                    } else {
+                        None
+                    }
+                }
+                LogicalOperator::Return(r) => find_filter_op(&r.input),
+                _ => None,
+            }
+        }
+        assert_eq!(find_filter_op(&plan.root), Some(BinaryOp::Contains));
+    }
+
+    #[test]
+    fn test_where_multiple_operators() {
+        let query = r#"{ user(where: { age_gte: 18, age_lte: 65 }) { name } }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        // Should have Filter with AND predicate
+        fn find_and(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::Filter(f) => {
+                    if let LogicalExpression::Binary { op, .. } = &f.predicate {
+                        *op == BinaryOp::And
+                    } else {
+                        false
+                    }
+                }
+                LogicalOperator::Return(r) => find_and(&r.input),
+                _ => false,
+            }
+        }
+        assert!(find_and(&plan.root));
+    }
+
+    // ==================== Mutation Tests ====================
+
+    #[test]
+    fn test_create_mutation() {
+        let query = r#"mutation { createUser(name: "Alice", age: 30) { name } }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        // Should contain CreateNode
+        fn find_create(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::CreateNode(_) => true,
+                LogicalOperator::Return(r) => find_create(&r.input),
+                _ => false,
+            }
+        }
+        assert!(find_create(&plan.root));
+    }
+
+    #[test]
+    fn test_create_mutation_labels() {
+        let query = r#"mutation { createPerson(name: "Bob") { name } }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        // Label should be "Person" (capitalized)
+        fn find_label(op: &LogicalOperator) -> Option<String> {
+            match op {
+                LogicalOperator::CreateNode(c) => c.labels.first().cloned(),
+                LogicalOperator::Return(r) => find_label(&r.input),
+                _ => None,
+            }
+        }
+        assert_eq!(find_label(&plan.root), Some("Person".to_string()));
+    }
+
+    #[test]
+    fn test_delete_mutation() {
+        let query = r#"mutation { deleteUser(id: 123) }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        // Should contain DeleteNode
+        fn find_delete(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::DeleteNode(_) => true,
+                _ => false,
+            }
+        }
+        assert!(find_delete(&plan.root));
+    }
+
+    #[test]
+    fn test_delete_mutation_requires_id() {
+        let query = r#"mutation { deleteUser(name: "Alice") }"#;
+        let result = translate(query);
+        // Should fail because 'id' argument is required
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_unknown_mutation() {
+        let query = r#"mutation { doSomething(name: "test") { id } }"#;
+        let result = translate(query);
+        // Should fail because mutation name doesn't start with create/update/delete
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_subscription_not_supported() {
+        let query = r#"subscription { userCreated { id } }"#;
         let result = translate(query);
         assert!(result.is_err());
     }

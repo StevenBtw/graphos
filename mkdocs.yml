@@ -195,6 +195,18 @@ nav:
       - Aggregations: user-guide/cypher/aggregations.md
       - Path Queries: user-guide/cypher/paths.md
       - Mutations: user-guide/cypher/mutations.md
+    - Gremlin Query Language:
+      - user-guide/gremlin/index.md
+      - Basic Traversals: user-guide/gremlin/basic-traversals.md
+      - Edge Traversals: user-guide/gremlin/edge-traversals.md
+      - Properties: user-guide/gremlin/properties.md
+      - Aggregations: user-guide/gremlin/aggregations.md
+    - GraphQL Query Language:
+      - user-guide/graphql/index.md
+      - Basic Queries: user-guide/graphql/basic-queries.md
+      - Arguments: user-guide/graphql/arguments.md
+      - Relationships: user-guide/graphql/relationships.md
+      - Aliases & Fragments: user-guide/graphql/aliases.md
     - SPARQL Query Language:
       - user-guide/sparql/index.md
       - Basic Queries: user-guide/sparql/basic-queries.md
@@ -292,6 +304,8 @@ nav:
   - Comparisons:
     - comparisons/index.md
     - Cypher vs GQL: comparisons/cypher-vs-gql.md
+    - Gremlin vs GQL: comparisons/gremlin-vs-gql.md
+    - GraphQL vs GQL: comparisons/graphql-vs-gql.md
     - SPARQL vs GQL: comparisons/sparql-vs-gql.md
 
   - Contributing:

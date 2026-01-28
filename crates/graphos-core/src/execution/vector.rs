@@ -372,6 +372,61 @@ impl ValueVector {
         }
     }
 
+    /// Returns the logical type of this vector.
+    #[must_use]
+    pub fn logical_type(&self) -> LogicalType {
+        self.data_type.clone()
+    }
+
+    /// Copies a row from this vector to the destination vector.
+    ///
+    /// The destination vector should have a compatible type. The value at `row`
+    /// is read from this vector and pushed to the destination vector.
+    pub fn copy_row_to(&self, row: usize, dest: &mut ValueVector) {
+        if self.is_null(row) {
+            dest.push_value(Value::Null);
+            return;
+        }
+
+        match &self.data {
+            VectorData::Bool(vec) => {
+                if let Some(&v) = vec.get(row) {
+                    dest.push_bool(v);
+                }
+            }
+            VectorData::Int64(vec) => {
+                if let Some(&v) = vec.get(row) {
+                    dest.push_int64(v);
+                }
+            }
+            VectorData::Float64(vec) => {
+                if let Some(&v) = vec.get(row) {
+                    dest.push_float64(v);
+                }
+            }
+            VectorData::String(vec) => {
+                if let Some(v) = vec.get(row) {
+                    dest.push_string(v.clone());
+                }
+            }
+            VectorData::NodeId(vec) => {
+                if let Some(&v) = vec.get(row) {
+                    dest.push_node_id(v);
+                }
+            }
+            VectorData::EdgeId(vec) => {
+                if let Some(&v) = vec.get(row) {
+                    dest.push_edge_id(v);
+                }
+            }
+            VectorData::Generic(vec) => {
+                if let Some(v) = vec.get(row) {
+                    dest.push_value(v.clone());
+                }
+            }
+        }
+    }
+
     /// Clears all data from this vector.
     pub fn clear(&mut self) {
         match &mut self.data {

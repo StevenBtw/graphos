@@ -999,8 +999,46 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.parse_case_expression()
             }
+            // Aggregate functions (COUNT, SUM, AVG, MIN, MAX, COLLECT)
+            TokenKind::Count => {
+                self.advance();
+                self.parse_aggregate_function("count")
+            }
             _ => Err(self.error("Expected expression")),
         }
+    }
+
+    fn parse_aggregate_function(&mut self, name: &str) -> Result<Expression> {
+        self.expect(TokenKind::LParen)?;
+
+        let distinct = if self.current.kind == TokenKind::Distinct {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
+        let mut args = Vec::new();
+        // Handle COUNT(*) special case
+        if self.current.kind == TokenKind::Star {
+            self.advance();
+            // For COUNT(*), we use a special marker
+            args.push(Expression::Variable("*".to_string()));
+        } else if self.current.kind != TokenKind::RParen {
+            args.push(self.parse_expression()?);
+            while self.current.kind == TokenKind::Comma {
+                self.advance();
+                args.push(self.parse_expression()?);
+            }
+        }
+
+        self.expect(TokenKind::RParen)?;
+
+        Ok(Expression::FunctionCall {
+            name: name.to_string(),
+            distinct,
+            args,
+        })
     }
 
     fn parse_case_expression(&mut self) -> Result<Expression> {

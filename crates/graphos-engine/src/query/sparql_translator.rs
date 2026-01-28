@@ -715,6 +715,8 @@ impl SparqlTranslator {
 mod tests {
     use super::*;
 
+    // === Basic SELECT Tests ===
+
     #[test]
     fn test_translate_simple_select() {
         let query = "SELECT ?x WHERE { ?x ?y ?z }";
@@ -734,6 +736,32 @@ mod tests {
     }
 
     #[test]
+    fn test_translate_select_wildcard() {
+        let query = "SELECT * WHERE { ?x ?y ?z }";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_select_distinct() {
+        let query = "SELECT DISTINCT ?x WHERE { ?x ?y ?z }";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_distinct(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::Distinct(_) => true,
+                LogicalOperator::Project(p) => find_distinct(&p.input),
+                _ => false,
+            }
+        }
+        assert!(find_distinct(&plan.root));
+    }
+
+    // === Filter Tests ===
+
+    #[test]
     fn test_translate_select_with_filter() {
         let query = "SELECT ?x WHERE { ?x ?y ?z FILTER(?z > 10) }";
         let result = translate(query);
@@ -741,16 +769,240 @@ mod tests {
     }
 
     #[test]
+    fn test_translate_filter_equality() {
+        let query = r#"SELECT ?x WHERE { ?x ?y ?z FILTER(?z = "test") }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_filter_and() {
+        let query = "SELECT ?x WHERE { ?x ?y ?z FILTER(?z > 10 && ?z < 100) }";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_filter_or() {
+        let query = r#"SELECT ?x WHERE { ?x ?y ?z FILTER(?z = 1 || ?z = 2) }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_filter_bound() {
+        let query = "SELECT ?x WHERE { ?x ?y ?z FILTER(BOUND(?z)) }";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    // === ASK Query Tests ===
+
+    #[test]
     fn test_translate_ask() {
         let query = "ASK { ?x ?y ?z }";
         let result = translate(query);
         assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        // ASK should have a Limit(1)
+        fn find_limit(op: &LogicalOperator) -> Option<&LimitOp> {
+            match op {
+                LogicalOperator::Limit(l) => Some(l),
+                _ => None,
+            }
+        }
+        let limit = find_limit(&plan.root).expect("Expected Limit");
+        assert_eq!(limit.count, 1);
     }
+
+    // === Solution Modifiers Tests ===
 
     #[test]
     fn test_translate_select_with_limit() {
         let query = "SELECT ?x WHERE { ?x ?y ?z } LIMIT 10";
         let result = translate(query);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_select_with_offset() {
+        let query = "SELECT ?x WHERE { ?x ?y ?z } OFFSET 5";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_skip(op: &LogicalOperator) -> Option<&SkipOp> {
+            match op {
+                LogicalOperator::Skip(s) => Some(s),
+                LogicalOperator::Project(p) => find_skip(&p.input),
+                _ => None,
+            }
+        }
+        let skip = find_skip(&plan.root).expect("Expected Skip");
+        assert_eq!(skip.count, 5);
+    }
+
+    #[test]
+    fn test_translate_select_with_order_by() {
+        let query = "SELECT ?x WHERE { ?x ?y ?z } ORDER BY ?z";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_sort(op: &LogicalOperator) -> Option<&SortOp> {
+            match op {
+                LogicalOperator::Sort(s) => Some(s),
+                LogicalOperator::Project(p) => find_sort(&p.input),
+                _ => None,
+            }
+        }
+        assert!(find_sort(&plan.root).is_some());
+    }
+
+    #[test]
+    fn test_translate_select_with_order_by_desc() {
+        let query = "SELECT ?x WHERE { ?x ?y ?z } ORDER BY DESC(?z)";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_sort(op: &LogicalOperator) -> Option<&SortOp> {
+            match op {
+                LogicalOperator::Sort(s) => Some(s),
+                LogicalOperator::Project(p) => find_sort(&p.input),
+                _ => None,
+            }
+        }
+        let sort = find_sort(&plan.root).expect("Expected Sort");
+        assert_eq!(sort.keys[0].order, SortOrder::Descending);
+    }
+
+    // === Graph Pattern Tests ===
+
+    #[test]
+    fn test_translate_union() {
+        let query = "SELECT ?x WHERE { { ?x ?y ?z } UNION { ?x ?a ?b } }";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_union(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::Union(_) => true,
+                LogicalOperator::Project(p) => find_union(&p.input),
+                _ => false,
+            }
+        }
+        assert!(find_union(&plan.root));
+    }
+
+    #[test]
+    fn test_translate_optional() {
+        let query = "SELECT ?x ?name WHERE { ?x ?y ?z OPTIONAL { ?x ?p ?name } }";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_bind() {
+        let query = "SELECT ?x ?doubled WHERE { ?x ?y ?z BIND(?z * 2 AS ?doubled) }";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    // === Aggregate Tests ===
+
+    #[test]
+    fn test_translate_count() {
+        let query = "SELECT (COUNT(?x) AS ?cnt) WHERE { ?x ?y ?z }";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_group_by() {
+        let query = "SELECT ?y (COUNT(?x) AS ?cnt) WHERE { ?x ?y ?z } GROUP BY ?y";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_aggregate(op: &LogicalOperator) -> Option<&AggregateOp> {
+            match op {
+                LogicalOperator::Aggregate(a) => Some(a),
+                LogicalOperator::Project(p) => find_aggregate(&p.input),
+                _ => None,
+            }
+        }
+        let agg = find_aggregate(&plan.root).expect("Expected Aggregate");
+        assert!(!agg.group_by.is_empty());
+    }
+
+    // === Expression Tests ===
+
+    #[test]
+    fn test_translate_arithmetic_expression() {
+        let query = "SELECT (?x + ?y AS ?sum) WHERE { ?x ?p ?y }";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_string_function() {
+        let query = r#"SELECT ?x WHERE { ?x ?y ?z FILTER(CONTAINS(?z, "test")) }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    // === CONSTRUCT and DESCRIBE Tests ===
+
+    #[test]
+    fn test_translate_construct() {
+        let query = "CONSTRUCT { ?x ?y ?z } WHERE { ?x ?y ?z }";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_describe() {
+        let query = "DESCRIBE ?x WHERE { ?x ?y ?z }";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    // === Multiple Triple Patterns ===
+
+    #[test]
+    fn test_translate_multiple_triples() {
+        let query = "SELECT ?x ?name ?age WHERE { ?x ?y ?name . ?x ?z ?age }";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    // === Literal Types ===
+
+    #[test]
+    fn test_translate_literal_types() {
+        let query = r#"SELECT ?x WHERE { ?x ?y 42 . ?x ?z "hello" . ?x ?w true }"#;
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    // === Helper Function Tests ===
+
+    #[test]
+    fn test_translator_new() {
+        let translator = SparqlTranslator::new();
+        assert!(translator.prefixes.is_empty());
+        assert!(translator.base.is_none());
+        assert_eq!(translator.anon_counter, 0);
+    }
+
+    #[test]
+    fn test_translator_next_anon() {
+        let mut translator = SparqlTranslator::new();
+        assert_eq!(translator.next_anon(), 0);
+        assert_eq!(translator.next_anon(), 1);
+        assert_eq!(translator.next_anon(), 2);
     }
 }

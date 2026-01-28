@@ -91,6 +91,8 @@ pub enum TokenKind {
     Optional,
     /// WITH keyword.
     With,
+    /// EXISTS keyword for subquery expressions.
+    Exists,
 
     // Literals
     /// Integer literal.
@@ -155,6 +157,9 @@ pub enum TokenKind {
     LeftArrow,
     /// -- double dash.
     DoubleDash,
+
+    /// Parameter ($name).
+    Parameter,
 
     /// End of input.
     Eof,
@@ -303,6 +308,7 @@ impl<'a> Lexer<'a> {
                 }
             }
             '\'' | '"' => self.scan_string(),
+            '$' => self.scan_parameter(),
             _ if ch.is_ascii_digit() => self.scan_number(),
             _ if ch.is_ascii_alphabetic() || ch == '_' => self.scan_identifier(),
             _ => {
@@ -382,6 +388,33 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn scan_parameter(&mut self) -> TokenKind {
+        // Skip the '$'
+        self.advance();
+
+        // Parameter name must start with a letter or underscore
+        if self.position >= self.input.len() {
+            return TokenKind::Error;
+        }
+
+        let ch = self.current_char();
+        if !ch.is_ascii_alphabetic() && ch != '_' {
+            return TokenKind::Error;
+        }
+
+        // Scan the rest of the identifier
+        while self.position < self.input.len() {
+            let ch = self.current_char();
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        TokenKind::Parameter
+    }
+
     fn scan_identifier(&mut self) -> TokenKind {
         let start = self.position;
         while self.position < self.input.len() {
@@ -430,6 +463,7 @@ impl<'a> Lexer<'a> {
             "THEN" => TokenKind::Then,
             "ELSE" => TokenKind::Else,
             "END" => TokenKind::End,
+            "EXISTS" => TokenKind::Exists,
             "OPTIONAL" => TokenKind::Optional,
             "WITH" => TokenKind::With,
             _ => TokenKind::Identifier,
@@ -487,5 +521,32 @@ mod tests {
         let s2 = lexer.next_token();
         assert_eq!(s2.kind, TokenKind::String);
         assert_eq!(s2.text, "\"world\"");
+    }
+
+    #[test]
+    fn test_parameter_tokens() {
+        let mut lexer = Lexer::new("$param1 $another_param");
+
+        let p1 = lexer.next_token();
+        assert_eq!(p1.kind, TokenKind::Parameter);
+        assert_eq!(p1.text, "$param1");
+
+        let p2 = lexer.next_token();
+        assert_eq!(p2.kind, TokenKind::Parameter);
+        assert_eq!(p2.text, "$another_param");
+    }
+
+    #[test]
+    fn test_parameter_in_query() {
+        let mut lexer = Lexer::new("n.age > $min_age");
+
+        assert_eq!(lexer.next_token().kind, TokenKind::Identifier); // n
+        assert_eq!(lexer.next_token().kind, TokenKind::Dot);
+        assert_eq!(lexer.next_token().kind, TokenKind::Identifier); // age
+        assert_eq!(lexer.next_token().kind, TokenKind::Gt);
+
+        let param = lexer.next_token();
+        assert_eq!(param.kind, TokenKind::Parameter);
+        assert_eq!(param.text, "$min_age");
     }
 }

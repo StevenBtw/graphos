@@ -137,6 +137,10 @@ impl TxId {
     /// The invalid/null transaction ID.
     pub const INVALID: Self = Self(0);
 
+    /// The system transaction ID used for non-transactional operations.
+    /// System transactions are always visible and committed.
+    pub const SYSTEM: Self = Self(1);
+
     /// Creates a new TxId from a raw u64 value.
     #[inline]
     #[must_use]
@@ -258,6 +262,251 @@ impl From<u64> for EpochId {
 
 impl From<EpochId> for u64 {
     fn from(id: EpochId) -> Self {
+        id.0
+    }
+}
+
+/// Unique identifier for a label in the catalog.
+///
+/// Labels are strings assigned to nodes to categorize them.
+/// The catalog assigns unique IDs for efficient storage and comparison.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[repr(transparent)]
+pub struct LabelId(pub u32);
+
+impl LabelId {
+    /// The invalid/null label ID.
+    pub const INVALID: Self = Self(u32::MAX);
+
+    /// Creates a new LabelId from a raw u32 value.
+    #[inline]
+    #[must_use]
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    /// Returns the raw u32 value.
+    #[inline]
+    #[must_use]
+    pub const fn as_u32(&self) -> u32 {
+        self.0
+    }
+
+    /// Checks if this is a valid label ID.
+    #[inline]
+    #[must_use]
+    pub const fn is_valid(&self) -> bool {
+        self.0 != u32::MAX
+    }
+}
+
+impl fmt::Debug for LabelId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_valid() {
+            write!(f, "LabelId({})", self.0)
+        } else {
+            write!(f, "LabelId(INVALID)")
+        }
+    }
+}
+
+impl fmt::Display for LabelId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u32> for LabelId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+impl From<LabelId> for u32 {
+    fn from(id: LabelId) -> Self {
+        id.0
+    }
+}
+
+/// Unique identifier for a property key in the catalog.
+///
+/// Property keys are strings used as names for node/edge properties.
+/// The catalog assigns unique IDs for efficient storage.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[repr(transparent)]
+pub struct PropertyKeyId(pub u32);
+
+impl PropertyKeyId {
+    /// The invalid/null property key ID.
+    pub const INVALID: Self = Self(u32::MAX);
+
+    /// Creates a new PropertyKeyId from a raw u32 value.
+    #[inline]
+    #[must_use]
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    /// Returns the raw u32 value.
+    #[inline]
+    #[must_use]
+    pub const fn as_u32(&self) -> u32 {
+        self.0
+    }
+
+    /// Checks if this is a valid property key ID.
+    #[inline]
+    #[must_use]
+    pub const fn is_valid(&self) -> bool {
+        self.0 != u32::MAX
+    }
+}
+
+impl fmt::Debug for PropertyKeyId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_valid() {
+            write!(f, "PropertyKeyId({})", self.0)
+        } else {
+            write!(f, "PropertyKeyId(INVALID)")
+        }
+    }
+}
+
+impl fmt::Display for PropertyKeyId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u32> for PropertyKeyId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+impl From<PropertyKeyId> for u32 {
+    fn from(id: PropertyKeyId) -> Self {
+        id.0
+    }
+}
+
+/// Unique identifier for an edge type in the catalog.
+///
+/// Edge types are strings that categorize relationships between nodes.
+/// The catalog assigns unique IDs for efficient storage.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[repr(transparent)]
+pub struct EdgeTypeId(pub u32);
+
+impl EdgeTypeId {
+    /// The invalid/null edge type ID.
+    pub const INVALID: Self = Self(u32::MAX);
+
+    /// Creates a new EdgeTypeId from a raw u32 value.
+    #[inline]
+    #[must_use]
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    /// Returns the raw u32 value.
+    #[inline]
+    #[must_use]
+    pub const fn as_u32(&self) -> u32 {
+        self.0
+    }
+
+    /// Checks if this is a valid edge type ID.
+    #[inline]
+    #[must_use]
+    pub const fn is_valid(&self) -> bool {
+        self.0 != u32::MAX
+    }
+}
+
+impl fmt::Debug for EdgeTypeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_valid() {
+            write!(f, "EdgeTypeId({})", self.0)
+        } else {
+            write!(f, "EdgeTypeId(INVALID)")
+        }
+    }
+}
+
+impl fmt::Display for EdgeTypeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u32> for EdgeTypeId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+impl From<EdgeTypeId> for u32 {
+    fn from(id: EdgeTypeId) -> Self {
+        id.0
+    }
+}
+
+/// Unique identifier for an index in the catalog.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[repr(transparent)]
+pub struct IndexId(pub u32);
+
+impl IndexId {
+    /// The invalid/null index ID.
+    pub const INVALID: Self = Self(u32::MAX);
+
+    /// Creates a new IndexId from a raw u32 value.
+    #[inline]
+    #[must_use]
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    /// Returns the raw u32 value.
+    #[inline]
+    #[must_use]
+    pub const fn as_u32(&self) -> u32 {
+        self.0
+    }
+
+    /// Checks if this is a valid index ID.
+    #[inline]
+    #[must_use]
+    pub const fn is_valid(&self) -> bool {
+        self.0 != u32::MAX
+    }
+}
+
+impl fmt::Debug for IndexId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_valid() {
+            write!(f, "IndexId({})", self.0)
+        } else {
+            write!(f, "IndexId(INVALID)")
+        }
+    }
+}
+
+impl fmt::Display for IndexId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u32> for IndexId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+impl From<IndexId> for u32 {
+    fn from(id: IndexId) -> Self {
         id.0
     }
 }

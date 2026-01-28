@@ -16,7 +16,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const DEFAULT_CHUNK_CAPACITY: usize = 64;
 
 /// Threshold for delta buffer compaction.
-const DELTA_COMPACTION_THRESHOLD: usize = 1024;
+///
+/// Lower values reduce memory overhead and iteration cost for delta buffers,
+/// but increase compaction frequency. 64 provides a good balance for typical workloads.
+const DELTA_COMPACTION_THRESHOLD: usize = 64;
 
 /// A chunk of adjacency entries.
 #[derive(Debug, Clone)]
@@ -201,24 +204,32 @@ impl ChunkedAdjacency {
         }
     }
 
-    /// Returns an iterator over neighbors of a node.
-    pub fn neighbors(&self, src: NodeId) -> impl Iterator<Item = NodeId> {
+    /// Returns all neighbors of a node.
+    ///
+    /// Note: This allocates a Vec to collect neighbors while the internal lock
+    /// is held, then returns the Vec. For traversal performance, consider using
+    /// `edges_from` if you also need edge IDs, to avoid multiple lookups.
+    #[must_use]
+    pub fn neighbors(&self, src: NodeId) -> Vec<NodeId> {
         let lists = self.lists.read();
-        let neighbors: Vec<NodeId> = lists
+        lists
             .get(&src)
             .map(|list| list.neighbors().collect())
-            .unwrap_or_default();
-        neighbors.into_iter()
+            .unwrap_or_default()
     }
 
-    /// Returns an iterator over (neighbor, edge_id) pairs.
-    pub fn edges_from(&self, src: NodeId) -> impl Iterator<Item = (NodeId, EdgeId)> {
+    /// Returns all (neighbor, edge_id) pairs for outgoing edges from a node.
+    ///
+    /// Note: This allocates a Vec to collect edges while the internal lock
+    /// is held, then returns the Vec. This is intentional to avoid holding
+    /// the lock across iteration.
+    #[must_use]
+    pub fn edges_from(&self, src: NodeId) -> Vec<(NodeId, EdgeId)> {
         let lists = self.lists.read();
-        let edges: Vec<(NodeId, EdgeId)> = lists
+        lists
             .get(&src)
             .map(|list| list.iter().collect())
-            .unwrap_or_default();
-        edges.into_iter()
+            .unwrap_or_default()
     }
 
     /// Returns the out-degree of a node.
@@ -287,7 +298,7 @@ mod tests {
         adj.add_edge(NodeId::new(0), NodeId::new(2), EdgeId::new(1));
         adj.add_edge(NodeId::new(0), NodeId::new(3), EdgeId::new(2));
 
-        let neighbors: Vec<_> = adj.neighbors(NodeId::new(0)).collect();
+        let neighbors = adj.neighbors(NodeId::new(0));
         assert_eq!(neighbors.len(), 3);
         assert!(neighbors.contains(&NodeId::new(1)));
         assert!(neighbors.contains(&NodeId::new(2)));
@@ -314,7 +325,7 @@ mod tests {
 
         adj.mark_deleted(NodeId::new(0), EdgeId::new(0));
 
-        let neighbors: Vec<_> = adj.neighbors(NodeId::new(0)).collect();
+        let neighbors = adj.neighbors(NodeId::new(0));
         assert_eq!(neighbors.len(), 1);
         assert!(neighbors.contains(&NodeId::new(2)));
     }
@@ -326,7 +337,7 @@ mod tests {
         adj.add_edge(NodeId::new(0), NodeId::new(1), EdgeId::new(10));
         adj.add_edge(NodeId::new(0), NodeId::new(2), EdgeId::new(20));
 
-        let edges: Vec<_> = adj.edges_from(NodeId::new(0)).collect();
+        let edges = adj.edges_from(NodeId::new(0));
         assert_eq!(edges.len(), 2);
         assert!(edges.contains(&(NodeId::new(1), EdgeId::new(10))));
         assert!(edges.contains(&(NodeId::new(2), EdgeId::new(20))));
@@ -344,7 +355,7 @@ mod tests {
         adj.compact();
 
         // All edges should still be accessible
-        let neighbors: Vec<_> = adj.neighbors(NodeId::new(0)).collect();
+        let neighbors = adj.neighbors(NodeId::new(0));
         assert_eq!(neighbors.len(), 10);
     }
 

@@ -92,6 +92,9 @@ pub enum TransactionError {
     /// Transaction commit failed due to conflict.
     Conflict,
 
+    /// Write-write conflict with another transaction.
+    WriteConflict(String),
+
     /// Deadlock detected.
     Deadlock,
 
@@ -110,6 +113,7 @@ impl fmt::Display for TransactionError {
         match self {
             TransactionError::Aborted => write!(f, "Transaction aborted"),
             TransactionError::Conflict => write!(f, "Transaction conflict"),
+            TransactionError::WriteConflict(msg) => write!(f, "Write conflict: {msg}"),
             TransactionError::Deadlock => write!(f, "Deadlock detected"),
             TransactionError::Timeout => write!(f, "Transaction timeout"),
             TransactionError::ReadOnly => write!(f, "Cannot write in read-only transaction"),

@@ -3,10 +3,9 @@
 //! Translates Gremlin AST to the common logical plan representation.
 
 use crate::query::plan::{
-    AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, CreateEdgeOp, CreateNodeOp,
-    DeleteEdgeOp, DeleteNodeOp, DistinctOp, ExpandDirection, ExpandOp, FilterOp, LimitOp,
-    LogicalExpression, LogicalOperator, LogicalPlan, NodeScanOp, ReturnItem, ReturnOp, SkipOp,
-    SortKey, SortOp, SortOrder, UnaryOp,
+    AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, CreateNodeOp, DeleteNodeOp,
+    DistinctOp, ExpandDirection, ExpandOp, FilterOp, LimitOp, LogicalExpression, LogicalOperator,
+    LogicalPlan, NodeScanOp, ReturnItem, ReturnOp, SkipOp, SortKey, SortOp, SortOrder, UnaryOp,
 };
 use graphos_adapters::query::gremlin::{self, ast};
 use graphos_common::types::Value;
@@ -136,7 +135,7 @@ impl GremlinTranslator {
                     input: None,
                 }))
             }
-            ast::TraversalSource::AddE(label) => {
+            ast::TraversalSource::AddE(_label) => {
                 // AddE needs from/to steps to complete
                 Err(Error::Internal(
                     "addE requires from() and to() steps".to_string(),
@@ -305,7 +304,8 @@ impl GremlinTranslator {
                 });
                 Ok((plan, None))
             }
-            ast::Step::Dedup(keys) => {
+            ast::Step::Dedup(_keys) => {
+                // TODO: Use keys for column-specific dedup when supported
                 let plan = LogicalOperator::Distinct(DistinctOp {
                     input: Box::new(input),
                 });
@@ -503,8 +503,8 @@ impl GremlinTranslator {
                 // In LogicalPlan, we use the label as an alias
                 Ok((input, Some(label.clone())))
             }
-            ast::Step::Property(prop_step) => {
-                // For now, property setting needs to be handled at execution
+            ast::Step::Property(_prop_step) => {
+                // TODO: Translate property setting to SetPropertyOp
                 Ok((input, None))
             }
             ast::Step::Drop => {
@@ -525,7 +525,7 @@ impl GremlinTranslator {
                 });
                 Ok((plan, Some(var)))
             }
-            ast::Step::AddE(label) => {
+            ast::Step::AddE(_label) => {
                 // AddE needs from/to context
                 Err(Error::Internal(
                     "addE requires from() and to() context".to_string(),
@@ -746,7 +746,7 @@ impl GremlinTranslator {
         }
     }
 
-    fn get_current_var(&self, source: &ast::TraversalSource) -> String {
+    fn get_current_var(&self, _source: &ast::TraversalSource) -> String {
         format!("_v{}", self.var_counter.load(Ordering::Relaxed))
     }
 
@@ -760,6 +760,8 @@ impl GremlinTranslator {
 mod tests {
     use super::*;
 
+    // === Basic Traversal Tests ===
+
     #[test]
     fn test_translate_simple_traversal() {
         let result = translate("g.V()");
@@ -771,6 +773,8 @@ mod tests {
         let result = translate("g.V().hasLabel('Person')");
         assert!(result.is_ok());
     }
+
+    // === Navigation Tests ===
 
     #[test]
     fn test_translate_navigation() {
@@ -791,10 +795,163 @@ mod tests {
     }
 
     #[test]
+    fn test_translate_in_navigation() {
+        let result = translate("g.V().in('knows')");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_expand(op: &LogicalOperator) -> Option<&ExpandOp> {
+            match op {
+                LogicalOperator::Expand(e) => Some(e),
+                LogicalOperator::Return(r) => find_expand(&r.input),
+                _ => None,
+            }
+        }
+
+        let expand = find_expand(&plan.root).expect("Expected Expand");
+        assert_eq!(expand.direction, ExpandDirection::Incoming);
+    }
+
+    #[test]
+    fn test_translate_both_navigation() {
+        let result = translate("g.V().both('knows')");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_expand(op: &LogicalOperator) -> Option<&ExpandOp> {
+            match op {
+                LogicalOperator::Expand(e) => Some(e),
+                LogicalOperator::Return(r) => find_expand(&r.input),
+                _ => None,
+            }
+        }
+
+        let expand = find_expand(&plan.root).expect("Expected Expand");
+        assert_eq!(expand.direction, ExpandDirection::Both);
+    }
+
+    #[test]
+    fn test_translate_out_e() {
+        let result = translate("g.V().outE('knows')");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_expand(op: &LogicalOperator) -> Option<&ExpandOp> {
+            match op {
+                LogicalOperator::Expand(e) => Some(e),
+                LogicalOperator::Return(r) => find_expand(&r.input),
+                _ => None,
+            }
+        }
+
+        let expand = find_expand(&plan.root).expect("Expected Expand");
+        assert!(expand.edge_variable.is_some());
+    }
+
+    // === Filter Tests ===
+
+    #[test]
+    fn test_translate_has_key_value() {
+        let result = translate("g.V().has('name', 'Alice')");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_filter(op: &LogicalOperator) -> Option<&FilterOp> {
+            match op {
+                LogicalOperator::Filter(f) => Some(f),
+                LogicalOperator::Return(r) => find_filter(&r.input),
+                _ => None,
+            }
+        }
+
+        let filter = find_filter(&plan.root).expect("Expected Filter");
+        if let LogicalExpression::Binary { op, .. } = &filter.predicate {
+            assert_eq!(*op, BinaryOp::Eq);
+        }
+    }
+
+    #[test]
+    fn test_translate_has_not() {
+        let result = translate("g.V().hasNot('deleted')");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_filter(op: &LogicalOperator) -> Option<&FilterOp> {
+            match op {
+                LogicalOperator::Filter(f) => Some(f),
+                LogicalOperator::Return(r) => find_filter(&r.input),
+                _ => None,
+            }
+        }
+
+        let filter = find_filter(&plan.root).expect("Expected Filter");
+        if let LogicalExpression::Unary { op, .. } = &filter.predicate {
+            assert_eq!(*op, UnaryOp::IsNull);
+        }
+    }
+
+    #[test]
+    fn test_translate_dedup() {
+        let result = translate("g.V().dedup()");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_distinct(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::Distinct(_) => true,
+                LogicalOperator::Return(r) => find_distinct(&r.input),
+                _ => false,
+            }
+        }
+
+        assert!(find_distinct(&plan.root));
+    }
+
+    // === Pagination Tests ===
+
+    #[test]
     fn test_translate_limit() {
         let result = translate("g.V().limit(10)");
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_translate_skip() {
+        let result = translate("g.V().skip(5)");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_skip(op: &LogicalOperator) -> Option<&SkipOp> {
+            match op {
+                LogicalOperator::Skip(s) => Some(s),
+                LogicalOperator::Return(r) => find_skip(&r.input),
+                _ => None,
+            }
+        }
+
+        let skip = find_skip(&plan.root).expect("Expected Skip");
+        assert_eq!(skip.count, 5);
+    }
+
+    #[test]
+    fn test_translate_range() {
+        let result = translate("g.V().range(5, 15)");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_limit(op: &LogicalOperator) -> Option<&LimitOp> {
+            match op {
+                LogicalOperator::Limit(l) => Some(l),
+                LogicalOperator::Return(r) => find_limit(&r.input),
+                _ => None,
+            }
+        }
+
+        let limit = find_limit(&plan.root).expect("Expected Limit");
+        assert_eq!(limit.count, 10); // 15 - 5
+    }
+
+    // === Aggregation Tests ===
 
     #[test]
     fn test_translate_count() {
@@ -811,6 +968,194 @@ mod tests {
             }
         } else {
             panic!("Expected Return operator");
+        }
+    }
+
+    #[test]
+    fn test_translate_sum() {
+        let result = translate("g.V().values('age').sum()");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_mean() {
+        let result = translate("g.V().values('age').mean()");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_min() {
+        let result = translate("g.V().values('age').min()");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_max() {
+        let result = translate("g.V().values('age').max()");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_fold() {
+        let result = translate("g.V().fold()");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_aggregate(op: &LogicalOperator) -> Option<&AggregateOp> {
+            match op {
+                LogicalOperator::Aggregate(a) => Some(a),
+                LogicalOperator::Return(r) => find_aggregate(&r.input),
+                _ => None,
+            }
+        }
+
+        let agg = find_aggregate(&plan.root).expect("Expected Aggregate");
+        assert_eq!(agg.aggregates[0].function, AggregateFunction::Collect);
+    }
+
+    // === Map Steps ===
+
+    #[test]
+    fn test_translate_values() {
+        let result = translate("g.V().values('name')");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            assert_eq!(ret.items.len(), 1);
+            if let LogicalExpression::Property { property, .. } = &ret.items[0].expression {
+                assert_eq!(property, "name");
+            }
+        }
+    }
+
+    #[test]
+    fn test_translate_id() {
+        let result = translate("g.V().id()");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            if let LogicalExpression::Id(_) = &ret.items[0].expression {
+                // OK
+            } else {
+                panic!("Expected Id expression");
+            }
+        }
+    }
+
+    #[test]
+    fn test_translate_label() {
+        let result = translate("g.V().label()");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        if let LogicalOperator::Return(ret) = &plan.root {
+            if let LogicalExpression::Labels(_) = &ret.items[0].expression {
+                // OK
+            } else {
+                panic!("Expected Labels expression");
+            }
+        }
+    }
+
+    // === Mutation Tests ===
+
+    #[test]
+    fn test_translate_add_v() {
+        let result = translate("g.addV('Person')");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_create(op: &LogicalOperator) -> Option<&CreateNodeOp> {
+            match op {
+                LogicalOperator::CreateNode(c) => Some(c),
+                LogicalOperator::Return(r) => find_create(&r.input),
+                _ => None,
+            }
+        }
+
+        let create = find_create(&plan.root).expect("Expected CreateNode");
+        assert_eq!(create.labels, vec!["Person".to_string()]);
+    }
+
+    #[test]
+    fn test_translate_drop() {
+        let result = translate("g.V().drop()");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_delete(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::DeleteNode(_) => true,
+                LogicalOperator::Return(r) => find_delete(&r.input),
+                _ => false,
+            }
+        }
+
+        assert!(find_delete(&plan.root));
+    }
+
+    // === Order Tests ===
+
+    #[test]
+    fn test_translate_order() {
+        let result = translate("g.V().order()");
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        fn find_sort(op: &LogicalOperator) -> Option<&SortOp> {
+            match op {
+                LogicalOperator::Sort(s) => Some(s),
+                LogicalOperator::Return(r) => find_sort(&r.input),
+                _ => None,
+            }
+        }
+
+        assert!(find_sort(&plan.root).is_some());
+    }
+
+    // === Predicate Tests ===
+
+    #[test]
+    fn test_predicate_gt() {
+        let translator = GremlinTranslator::new();
+        let expr = LogicalExpression::Variable("x".to_string());
+        let pred = ast::Predicate::Gt(Value::Int64(10));
+        let result = translator.translate_predicate(&pred, expr).unwrap();
+
+        if let LogicalExpression::Binary { op, .. } = result {
+            assert_eq!(op, BinaryOp::Gt);
+        } else {
+            panic!("Expected Binary expression");
+        }
+    }
+
+    #[test]
+    fn test_predicate_within() {
+        let translator = GremlinTranslator::new();
+        let expr = LogicalExpression::Variable("x".to_string());
+        let pred = ast::Predicate::Within(vec![Value::Int64(1), Value::Int64(2)]);
+        let result = translator.translate_predicate(&pred, expr).unwrap();
+
+        if let LogicalExpression::Binary { op, .. } = result {
+            assert_eq!(op, BinaryOp::In);
+        } else {
+            panic!("Expected Binary expression");
+        }
+    }
+
+    #[test]
+    fn test_predicate_containing() {
+        let translator = GremlinTranslator::new();
+        let expr = LogicalExpression::Variable("x".to_string());
+        let pred = ast::Predicate::Containing("test".to_string());
+        let result = translator.translate_predicate(&pred, expr).unwrap();
+
+        if let LogicalExpression::Binary { op, .. } = result {
+            assert_eq!(op, BinaryOp::Contains);
+        } else {
+            panic!("Expected Binary expression");
         }
     }
 }

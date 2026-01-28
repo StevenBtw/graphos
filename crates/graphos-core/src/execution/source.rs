@@ -359,7 +359,9 @@ impl Source for TripleScanSource {
 /// Push operator that performs a hash join on RDF triple patterns.
 ///
 /// Used when joining two triple patterns that share a variable.
+/// Note: This is a stub for future implementation.
 #[cfg(feature = "rdf")]
+#[allow(dead_code)]
 pub struct TripleJoinOperator {
     /// Name of the join variable.
     join_var: String,

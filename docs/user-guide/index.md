@@ -7,6 +7,8 @@ description: Comprehensive guide to using Graphos.
 
 Welcome to the Graphos User Guide. This section covers everything you need to know to use Graphos effectively.
 
+Graphos supports both **Labeled Property Graph (LPG)** and **RDF** data models, with multiple query languages for each.
+
 ## Sections
 
 <div class="grid cards" markdown>
@@ -15,7 +17,7 @@ Welcome to the Graphos User Guide. This section covers everything you need to kn
 
     ---
 
-    Learn about the Labeled Property Graph model: nodes, edges, and properties.
+    Learn about LPG and RDF data models: nodes, edges, triples, and properties.
 
     [:octicons-arrow-right-24: Data Model](data-model/index.md)
 
@@ -23,9 +25,41 @@ Welcome to the Graphos User Guide. This section covers everything you need to kn
 
     ---
 
-    Master the GQL query language for reading and writing graph data.
+    Master the ISO standard GQL query language (default).
 
     [:octicons-arrow-right-24: GQL Guide](gql/index.md)
+
+-   :material-graph-outline:{ .lg .middle } **Cypher Query Language**
+
+    ---
+
+    Use Neo4j-compatible Cypher for LPG queries.
+
+    [:octicons-arrow-right-24: Cypher Guide](cypher/index.md)
+
+-   :material-transit-connection-variant:{ .lg .middle } **Gremlin Query Language**
+
+    ---
+
+    Traverse graphs with Apache TinkerPop's Gremlin.
+
+    [:octicons-arrow-right-24: Gremlin Guide](gremlin/index.md)
+
+-   :material-graphql:{ .lg .middle } **GraphQL Query Language**
+
+    ---
+
+    Query LPG and RDF data using familiar GraphQL syntax.
+
+    [:octicons-arrow-right-24: GraphQL Guide](graphql/index.md)
+
+-   :material-semantic-web:{ .lg .middle } **SPARQL Query Language**
+
+    ---
+
+    Query RDF data with the W3C standard SPARQL.
+
+    [:octicons-arrow-right-24: SPARQL Guide](sparql/index.md)
 
 -   :fontawesome-brands-python:{ .lg .middle } **Python API**
 

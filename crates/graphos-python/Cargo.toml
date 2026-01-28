@@ -17,8 +17,10 @@ graphos-common = { path = "../graphos-common" }
 graphos-adapters = { path = "../graphos-adapters" }
 
 pyo3 = { workspace = true, features = ["extension-module"] }
+pyo3-async-runtimes = { workspace = true }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 
 [features]
 default = ["gql"]

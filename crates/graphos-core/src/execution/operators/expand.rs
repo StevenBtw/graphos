@@ -4,7 +4,7 @@ use super::{Operator, OperatorError, OperatorResult};
 use crate::execution::DataChunk;
 use crate::graph::lpg::LpgStore;
 use crate::graph::Direction;
-use graphos_common::types::{EdgeId, LogicalType, NodeId};
+use graphos_common::types::{EdgeId, EpochId, LogicalType, NodeId, TxId};
 use std::sync::Arc;
 
 /// An expand operator that traverses edges from source nodes.
@@ -34,6 +34,10 @@ pub struct ExpandOperator {
     current_edge_idx: usize,
     /// Whether the operator is exhausted.
     exhausted: bool,
+    /// Transaction ID for MVCC visibility (None = use current epoch).
+    tx_id: Option<TxId>,
+    /// Epoch for version visibility.
+    viewing_epoch: Option<EpochId>,
 }
 
 impl ExpandOperator {
@@ -57,12 +61,23 @@ impl ExpandOperator {
             current_edges: Vec::new(),
             current_edge_idx: 0,
             exhausted: false,
+            tx_id: None,
+            viewing_epoch: None,
         }
     }
 
     /// Sets the chunk capacity.
     pub fn with_chunk_capacity(mut self, capacity: usize) -> Self {
         self.chunk_capacity = capacity;
+        self
+    }
+
+    /// Sets the transaction context for MVCC visibility.
+    ///
+    /// When set, the expand will only traverse visible edges and nodes.
+    pub fn with_tx_context(mut self, epoch: EpochId, tx_id: Option<TxId>) -> Self {
+        self.viewing_epoch = Some(epoch);
+        self.tx_id = tx_id;
         self
     }
 
@@ -103,18 +118,37 @@ impl ExpandOperator {
             .get_node_id(self.current_row)
             .ok_or_else(|| OperatorError::Execution("Expected node ID in source column".into()))?;
 
+        // Get visibility context
+        let epoch = self.viewing_epoch;
+        let tx = self.tx_id.unwrap_or(TxId::SYSTEM);
+
         // Get edges from this node
         let edges: Vec<(NodeId, EdgeId)> = self
             .store
             .edges_from(source_id, self.direction)
-            .filter(|(_, edge_id)| {
+            .filter(|(target_id, edge_id)| {
                 // Filter by edge type if specified
-                if let Some(ref filter_type) = self.edge_type {
+                let type_matches = if let Some(ref filter_type) = self.edge_type {
                     if let Some(edge_type) = self.store.edge_type(*edge_id) {
                         edge_type.as_ref() == filter_type.as_str()
                     } else {
                         false
                     }
+                } else {
+                    true
+                };
+
+                if !type_matches {
+                    return false;
+                }
+
+                // Filter by visibility if we have tx context
+                if let Some(epoch) = epoch {
+                    // Check if edge and target node are visible
+                    let edge_visible = self.store.get_edge_versioned(*edge_id, epoch, tx).is_some();
+                    let target_visible =
+                        self.store.get_node_versioned(*target_id, epoch, tx).is_some();
+                    edge_visible && target_visible
                 } else {
                     true
                 }
@@ -133,8 +167,26 @@ impl Operator for ExpandOperator {
             return Ok(None);
         }
 
-        // Output schema: [source_node, edge, target_node]
-        let schema = [LogicalType::Node, LogicalType::Edge, LogicalType::Node];
+        // Build output schema: preserve all input columns + edge + target
+        // We need to build this dynamically based on input schema
+        let input_chunk = if self.current_input.is_none() {
+            if !self.load_next_input()? {
+                return Ok(None);
+            }
+            self.load_edges_for_current_row()?;
+            self.current_input.as_ref().unwrap()
+        } else {
+            self.current_input.as_ref().unwrap()
+        };
+
+        // Build schema: [input_columns..., edge, target]
+        let input_col_count = input_chunk.column_count();
+        let mut schema: Vec<LogicalType> = (0..input_col_count)
+            .map(|i| input_chunk.column(i).map_or(LogicalType::Any, |c| c.data_type().clone()))
+            .collect();
+        schema.push(LogicalType::Edge);
+        schema.push(LogicalType::Node);
+
         let mut chunk = DataChunk::with_capacity(&schema, self.chunk_capacity);
         let mut count = 0;
 
@@ -167,40 +219,27 @@ impl Operator for ExpandOperator {
                 self.load_edges_for_current_row()?;
             }
 
-            // Get the source node ID
-            let source_id = self
-                .current_input
-                .as_ref()
-                .and_then(|c| c.column(self.source_column))
-                .and_then(|col| col.get_node_id(self.current_row))
-                .ok_or_else(|| {
-                    OperatorError::Execution("Failed to get source node ID".into())
-                })?;
-
             // Get the current edge
             let (target_id, edge_id) = self.current_edges[self.current_edge_idx];
 
-            // Add to output chunk
-            // Columns 0, 1, 2 guaranteed to exist: chunk created with 3-column schema on line 138
-            {
-                // Source node
-                let col = chunk
-                    .column_mut(0)
-                    .expect("column 0 exists: chunk created with 3-column schema");
-                col.push_node_id(source_id);
+            // Copy all input columns to output
+            let input = self.current_input.as_ref().unwrap();
+            for col_idx in 0..input_col_count {
+                if let Some(input_col) = input.column(col_idx) {
+                    if let Some(output_col) = chunk.column_mut(col_idx) {
+                        // Use copy_row_to which preserves NodeId/EdgeId types
+                        input_col.copy_row_to(self.current_row, output_col);
+                    }
+                }
             }
-            {
-                // Edge
-                let col = chunk
-                    .column_mut(1)
-                    .expect("column 1 exists: chunk created with 3-column schema");
+
+            // Add edge column
+            if let Some(col) = chunk.column_mut(input_col_count) {
                 col.push_edge_id(edge_id);
             }
-            {
-                // Target node
-                let col = chunk
-                    .column_mut(2)
-                    .expect("column 2 exists: chunk created with 3-column schema");
+
+            // Add target node column
+            if let Some(col) = chunk.column_mut(input_col_count + 1) {
                 col.push_node_id(target_id);
             }
 

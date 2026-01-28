@@ -651,8 +651,62 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RBracket)?;
                 Ok(Expression::List(elements))
             }
+            TokenKind::Parameter => {
+                // Parameter token includes the $ prefix, so we extract just the name
+                let full_text = &self.current.text;
+                let name = full_text.trim_start_matches('$').to_string();
+                self.advance();
+                Ok(Expression::Parameter(name))
+            }
+            TokenKind::Exists => {
+                self.advance();
+                self.expect(TokenKind::LBrace)?;
+                let inner_query = self.parse_exists_inner_query()?;
+                self.expect(TokenKind::RBrace)?;
+                Ok(Expression::ExistsSubquery {
+                    query: Box::new(inner_query),
+                })
+            }
             _ => Err(self.error("Expected expression")),
         }
+    }
+
+    /// Parses the inner query of an EXISTS subquery.
+    /// Handles: EXISTS { MATCH (n)-[:REL]->() [WHERE ...] }
+    fn parse_exists_inner_query(&mut self) -> Result<QueryStatement> {
+        let mut match_clauses = Vec::new();
+
+        // Parse MATCH clauses
+        while self.current.kind == TokenKind::Match || self.current.kind == TokenKind::Optional {
+            match_clauses.push(self.parse_match_clause()?);
+        }
+
+        if match_clauses.is_empty() {
+            return Err(self.error("EXISTS subquery requires at least one MATCH clause"));
+        }
+
+        // Parse optional WHERE
+        let where_clause = if self.current.kind == TokenKind::Where {
+            Some(self.parse_where_clause()?)
+        } else {
+            None
+        };
+
+        // EXISTS doesn't need RETURN - create empty return clause
+        Ok(QueryStatement {
+            match_clauses,
+            where_clause,
+            with_clauses: vec![],
+            return_clause: ReturnClause {
+                distinct: false,
+                items: vec![],
+                order_by: None,
+                skip: None,
+                limit: None,
+                span: None,
+            },
+            span: None,
+        })
     }
 
     fn parse_property_map(&mut self) -> Result<Vec<(String, Expression)>> {
@@ -981,6 +1035,54 @@ mod tests {
             }
         } else {
             panic!("Expected Query statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_with_parameter() {
+        let mut parser = Parser::new("MATCH (n:Person) WHERE n.age > $min_age RETURN n");
+        let result = parser.parse();
+        assert!(result.is_ok());
+
+        if let Statement::Query(query) = result.unwrap() {
+            // Check that the WHERE clause contains a parameter
+            let where_clause = query.where_clause.as_ref().expect("Expected WHERE clause");
+            if let Expression::Binary { right, .. } = &where_clause.expression {
+                if let Expression::Parameter(name) = right.as_ref() {
+                    assert_eq!(name, "min_age");
+                } else {
+                    panic!("Expected parameter, got {:?}", right);
+                }
+            } else {
+                panic!("Expected binary expression in WHERE clause");
+            }
+        } else {
+            panic!("Expected Query statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_insert_with_parameter() {
+        let mut parser = Parser::new("INSERT (n:Person {name: $name, age: $age})");
+        let result = parser.parse();
+        assert!(result.is_ok());
+
+        if let Statement::DataModification(DataModificationStatement::Insert(insert)) =
+            result.unwrap()
+        {
+            if let Pattern::Node(node) = &insert.patterns[0] {
+                assert_eq!(node.properties.len(), 2);
+                // Check first property is a parameter
+                if let Expression::Parameter(name) = &node.properties[0].1 {
+                    assert_eq!(name, "name");
+                } else {
+                    panic!("Expected parameter for name property");
+                }
+            } else {
+                panic!("Expected node pattern");
+            }
+        } else {
+            panic!("Expected Insert statement");
         }
     }
 }

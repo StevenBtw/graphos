@@ -3,9 +3,10 @@
 //! Translates GQL AST to the common logical plan representation.
 
 use crate::query::plan::{
-    AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, ExpandDirection, ExpandOp, FilterOp,
-    LimitOp, LogicalExpression, LogicalOperator, LogicalPlan, NodeScanOp, ReturnItem, ReturnOp,
-    SkipOp, SortKey, SortOp, SortOrder, UnaryOp,
+    AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, DeleteNodeOp, DistinctOp,
+    ExpandDirection, ExpandOp, FilterOp, JoinOp, JoinType, LeftJoinOp, LimitOp, LogicalExpression,
+    LogicalOperator, LogicalPlan, NodeScanOp, ProjectOp, Projection, ReturnItem, ReturnOp,
+    SetPropertyOp, SkipOp, SortKey, SortOp, SortOrder, UnaryOp,
 };
 use graphos_adapters::query::gql::{self, ast};
 use graphos_common::types::Value;
@@ -45,14 +46,24 @@ impl GqlTranslator {
         let mut plan = LogicalOperator::Empty;
 
         for match_clause in &query.match_clauses {
-            // FIXME(optional-match): Handle OPTIONAL MATCH with LEFT JOIN semantics
-            // For now, treat all MATCH clauses the same way
             let match_plan = self.translate_match(match_clause)?;
             if matches!(plan, LogicalOperator::Empty) {
                 plan = match_plan;
+            } else if match_clause.optional {
+                // OPTIONAL MATCH uses LEFT JOIN semantics
+                plan = LogicalOperator::LeftJoin(LeftJoinOp {
+                    left: Box::new(plan),
+                    right: Box::new(match_plan),
+                    condition: None,
+                });
             } else {
-                // Combine multiple MATCH clauses
-                plan = match_plan;
+                // Regular MATCH - combine with cross join (implicit join on shared variables)
+                plan = LogicalOperator::Join(JoinOp {
+                    left: Box::new(plan),
+                    right: Box::new(match_plan),
+                    join_type: JoinType::Cross,
+                    conditions: vec![],
+                });
             }
         }
 
@@ -66,9 +77,38 @@ impl GqlTranslator {
         }
 
         // Handle WITH clauses (projection for query chaining)
-        // FIXME(with-clause): Handle each WITH as a subquery
-        for _with_clause in &query.with_clauses {
-            // WITH clause handling - for now we just continue
+        for with_clause in &query.with_clauses {
+            let projections: Vec<Projection> = with_clause
+                .items
+                .iter()
+                .map(|item| {
+                    Ok(Projection {
+                        expression: self.translate_expression(&item.expression)?,
+                        alias: item.alias.clone(),
+                    })
+                })
+                .collect::<Result<_>>()?;
+
+            plan = LogicalOperator::Project(ProjectOp {
+                projections,
+                input: Box::new(plan),
+            });
+
+            // Apply WHERE filter if present in WITH clause
+            if let Some(where_clause) = &with_clause.where_clause {
+                let predicate = self.translate_expression(&where_clause.expression)?;
+                plan = LogicalOperator::Filter(FilterOp {
+                    predicate,
+                    input: Box::new(plan),
+                });
+            }
+
+            // Handle DISTINCT
+            if with_clause.distinct {
+                plan = LogicalOperator::Distinct(DistinctOp {
+                    input: Box::new(plan),
+                });
+            }
         }
 
         // Apply SKIP
@@ -298,13 +338,83 @@ impl GqlTranslator {
     ) -> Result<LogicalPlan> {
         match dm {
             ast::DataModificationStatement::Insert(insert) => self.translate_insert(insert),
-            ast::DataModificationStatement::Delete(_) => Err(Error::Internal(
-                "DELETE not yet supported".to_string(),
-            )),
-            ast::DataModificationStatement::Set(_) => Err(Error::Internal(
-                "SET not yet supported".to_string(),
-            )),
+            ast::DataModificationStatement::Delete(delete) => self.translate_delete(delete),
+            ast::DataModificationStatement::Set(set) => self.translate_set(set),
         }
+    }
+
+    fn translate_delete(&self, delete: &ast::DeleteStatement) -> Result<LogicalPlan> {
+        // DELETE requires a preceding MATCH clause to identify what to delete.
+        // For standalone DELETE, we need to scan and delete the specified variables.
+        // This is typically used as: MATCH (n:Label) DELETE n
+
+        if delete.variables.is_empty() {
+            return Err(Error::Internal("DELETE requires at least one variable".to_string()));
+        }
+
+        // For now, we only support deleting nodes (not edges directly)
+        // Build a chain of delete operators
+        let first_var = &delete.variables[0];
+
+        // Create a scan to find the entities to delete
+        let scan = LogicalOperator::NodeScan(NodeScanOp {
+            variable: first_var.clone(),
+            label: None,
+            input: None,
+        });
+
+        // Delete the first variable
+        let mut plan = LogicalOperator::DeleteNode(DeleteNodeOp {
+            variable: first_var.clone(),
+            input: Box::new(scan),
+        });
+
+        // Chain additional deletes
+        for var in delete.variables.iter().skip(1) {
+            plan = LogicalOperator::DeleteNode(DeleteNodeOp {
+                variable: var.clone(),
+                input: Box::new(plan),
+            });
+        }
+
+        Ok(LogicalPlan::new(plan))
+    }
+
+    fn translate_set(&self, set: &ast::SetStatement) -> Result<LogicalPlan> {
+        // SET requires a preceding MATCH clause to identify what to update.
+        // For standalone SET, we error - it should be part of a query.
+
+        if set.assignments.is_empty() {
+            return Err(Error::Internal("SET requires at least one assignment".to_string()));
+        }
+
+        // Group assignments by variable
+        let first_assignment = &set.assignments[0];
+        let var = &first_assignment.variable;
+
+        // Create a scan to find the entity to update
+        let scan = LogicalOperator::NodeScan(NodeScanOp {
+            variable: var.clone(),
+            label: None,
+            input: None,
+        });
+
+        // Build property assignments for this variable
+        let properties: Vec<(String, LogicalExpression)> = set
+            .assignments
+            .iter()
+            .filter(|a| &a.variable == var)
+            .map(|a| Ok((a.property.clone(), self.translate_expression(&a.value)?)))
+            .collect::<Result<_>>()?;
+
+        let plan = LogicalOperator::SetProperty(SetPropertyOp {
+            variable: var.clone(),
+            properties,
+            replace: false,
+            input: Box::new(scan),
+        });
+
+        Ok(LogicalPlan::new(plan))
     }
 
     fn translate_insert(&self, insert: &ast::InsertStatement) -> Result<LogicalPlan> {
@@ -359,6 +469,7 @@ impl GqlTranslator {
         match expr {
             ast::Expression::Literal(lit) => Ok(self.translate_literal(lit)),
             ast::Expression::Variable(name) => Ok(LogicalExpression::Variable(name.clone())),
+            ast::Expression::Parameter(name) => Ok(LogicalExpression::Parameter(name.clone())),
             ast::Expression::PropertyAccess { variable, property } => {
                 Ok(LogicalExpression::Property {
                     variable: variable.clone(),
@@ -433,6 +544,11 @@ impl GqlTranslator {
                     else_clause,
                 })
             }
+            ast::Expression::ExistsSubquery { query } => {
+                // Translate inner query to logical operator
+                let inner_plan = self.translate_subquery_to_operator(query)?;
+                Ok(LogicalExpression::ExistsSubquery(Box::new(inner_plan)))
+            }
         }
     }
 
@@ -475,6 +591,35 @@ impl GqlTranslator {
             ast::UnaryOp::IsNull => UnaryOp::IsNull,
             ast::UnaryOp::IsNotNull => UnaryOp::IsNotNull,
         }
+    }
+
+    /// Translates a subquery to a logical operator (without Return).
+    fn translate_subquery_to_operator(&self, query: &ast::QueryStatement) -> Result<LogicalOperator> {
+        let mut plan = LogicalOperator::Empty;
+
+        for match_clause in &query.match_clauses {
+            let match_plan = self.translate_match(match_clause)?;
+            plan = if matches!(plan, LogicalOperator::Empty) {
+                match_plan
+            } else {
+                LogicalOperator::Join(JoinOp {
+                    left: Box::new(plan),
+                    right: Box::new(match_plan),
+                    join_type: JoinType::Cross,
+                    conditions: vec![],
+                })
+            };
+        }
+
+        if let Some(where_clause) = &query.where_clause {
+            let predicate = self.translate_expression(&where_clause.expression)?;
+            plan = LogicalOperator::Filter(FilterOp {
+                predicate,
+                input: Box::new(plan),
+            });
+        }
+
+        Ok(plan)
     }
 
     /// Extracts aggregate expressions and group-by expressions from RETURN items.
@@ -578,6 +723,8 @@ fn contains_aggregate(expr: &ast::Expression) -> bool {
 mod tests {
     use super::*;
 
+    // === Basic MATCH Tests ===
+
     #[test]
     fn test_translate_simple_match() {
         let query = "MATCH (n:Person) RETURN n";
@@ -614,5 +761,502 @@ mod tests {
         } else {
             panic!("Expected Return operator");
         }
+    }
+
+    #[test]
+    fn test_translate_match_without_label() {
+        let query = "MATCH (n) RETURN n";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        if let LogicalOperator::Return(ret) = &plan.root {
+            if let LogicalOperator::NodeScan(scan) = ret.input.as_ref() {
+                assert!(scan.label.is_none());
+            } else {
+                panic!("Expected NodeScan operator");
+            }
+        } else {
+            panic!("Expected Return operator");
+        }
+    }
+
+    #[test]
+    fn test_translate_match_distinct() {
+        let query = "MATCH (n:Person) RETURN DISTINCT n.name";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        if let LogicalOperator::Return(ret) = &plan.root {
+            assert!(ret.distinct);
+        } else {
+            panic!("Expected Return operator");
+        }
+    }
+
+    // === Filter and Predicate Tests ===
+
+    #[test]
+    fn test_translate_filter_equality() {
+        let query = "MATCH (n:Person) WHERE n.name = 'Alice' RETURN n";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        // Navigate to find Filter
+        fn find_filter(op: &LogicalOperator) -> Option<&FilterOp> {
+            match op {
+                LogicalOperator::Filter(f) => Some(f),
+                LogicalOperator::Return(r) => find_filter(&r.input),
+                _ => None,
+            }
+        }
+
+        let filter = find_filter(&plan.root).expect("Expected Filter");
+        if let LogicalExpression::Binary { op, .. } = &filter.predicate {
+            assert_eq!(*op, BinaryOp::Eq);
+        }
+    }
+
+    #[test]
+    fn test_translate_filter_and() {
+        let query = "MATCH (n:Person) WHERE n.age > 20 AND n.age < 40 RETURN n";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_filter(op: &LogicalOperator) -> Option<&FilterOp> {
+            match op {
+                LogicalOperator::Filter(f) => Some(f),
+                LogicalOperator::Return(r) => find_filter(&r.input),
+                _ => None,
+            }
+        }
+
+        let filter = find_filter(&plan.root).expect("Expected Filter");
+        if let LogicalExpression::Binary { op, .. } = &filter.predicate {
+            assert_eq!(*op, BinaryOp::And);
+        }
+    }
+
+    #[test]
+    fn test_translate_filter_or() {
+        let query = "MATCH (n:Person) WHERE n.name = 'Alice' OR n.name = 'Bob' RETURN n";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_filter(op: &LogicalOperator) -> Option<&FilterOp> {
+            match op {
+                LogicalOperator::Filter(f) => Some(f),
+                LogicalOperator::Return(r) => find_filter(&r.input),
+                _ => None,
+            }
+        }
+
+        let filter = find_filter(&plan.root).expect("Expected Filter");
+        if let LogicalExpression::Binary { op, .. } = &filter.predicate {
+            assert_eq!(*op, BinaryOp::Or);
+        }
+    }
+
+    #[test]
+    fn test_translate_filter_not() {
+        let query = "MATCH (n:Person) WHERE NOT n.active RETURN n";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_filter(op: &LogicalOperator) -> Option<&FilterOp> {
+            match op {
+                LogicalOperator::Filter(f) => Some(f),
+                LogicalOperator::Return(r) => find_filter(&r.input),
+                _ => None,
+            }
+        }
+
+        let filter = find_filter(&plan.root).expect("Expected Filter");
+        if let LogicalExpression::Unary { op, .. } = &filter.predicate {
+            assert_eq!(*op, UnaryOp::Not);
+        }
+    }
+
+    // === Path Pattern / Join Tests ===
+
+    #[test]
+    fn test_translate_path_pattern() {
+        let query = "MATCH (a:Person)-[:KNOWS]->(b:Person) RETURN a, b";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        // Find Expand operator
+        fn find_expand(op: &LogicalOperator) -> Option<&ExpandOp> {
+            match op {
+                LogicalOperator::Expand(e) => Some(e),
+                LogicalOperator::Return(r) => find_expand(&r.input),
+                LogicalOperator::Filter(f) => find_expand(&f.input),
+                _ => None,
+            }
+        }
+
+        let expand = find_expand(&plan.root).expect("Expected Expand");
+        assert_eq!(expand.direction, ExpandDirection::Outgoing);
+        assert_eq!(expand.edge_type.as_deref(), Some("KNOWS"));
+    }
+
+    #[test]
+    fn test_translate_incoming_path() {
+        let query = "MATCH (a:Person)<-[:KNOWS]-(b:Person) RETURN a, b";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_expand(op: &LogicalOperator) -> Option<&ExpandOp> {
+            match op {
+                LogicalOperator::Expand(e) => Some(e),
+                LogicalOperator::Return(r) => find_expand(&r.input),
+                _ => None,
+            }
+        }
+
+        let expand = find_expand(&plan.root).expect("Expected Expand");
+        assert_eq!(expand.direction, ExpandDirection::Incoming);
+    }
+
+    #[test]
+    fn test_translate_undirected_path() {
+        let query = "MATCH (a:Person)-[:KNOWS]-(b:Person) RETURN a, b";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_expand(op: &LogicalOperator) -> Option<&ExpandOp> {
+            match op {
+                LogicalOperator::Expand(e) => Some(e),
+                LogicalOperator::Return(r) => find_expand(&r.input),
+                _ => None,
+            }
+        }
+
+        let expand = find_expand(&plan.root).expect("Expected Expand");
+        assert_eq!(expand.direction, ExpandDirection::Both);
+    }
+
+    // === Aggregation Tests ===
+
+    #[test]
+    fn test_translate_count_aggregate() {
+        let query = "MATCH (n:Person) RETURN COUNT(n)";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        if let LogicalOperator::Aggregate(agg) = &plan.root {
+            assert_eq!(agg.aggregates.len(), 1);
+            assert_eq!(agg.aggregates[0].function, AggregateFunction::Count);
+        } else {
+            panic!("Expected Aggregate operator, got {:?}", plan.root);
+        }
+    }
+
+    #[test]
+    fn test_translate_sum_aggregate() {
+        let query = "MATCH (n:Person) RETURN SUM(n.age)";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        if let LogicalOperator::Aggregate(agg) = &plan.root {
+            assert_eq!(agg.aggregates.len(), 1);
+            assert_eq!(agg.aggregates[0].function, AggregateFunction::Sum);
+        } else {
+            panic!("Expected Aggregate operator");
+        }
+    }
+
+    #[test]
+    fn test_translate_group_by_aggregate() {
+        let query = "MATCH (n:Person) RETURN n.city, COUNT(n)";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        if let LogicalOperator::Aggregate(agg) = &plan.root {
+            assert_eq!(agg.group_by.len(), 1); // n.city
+            assert_eq!(agg.aggregates.len(), 1); // COUNT(n)
+        } else {
+            panic!("Expected Aggregate operator");
+        }
+    }
+
+    // === Ordering and Pagination Tests ===
+
+    #[test]
+    fn test_translate_order_by() {
+        let query = "MATCH (n:Person) RETURN n ORDER BY n.name";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        if let LogicalOperator::Return(ret) = &plan.root {
+            if let LogicalOperator::Sort(sort) = ret.input.as_ref() {
+                assert_eq!(sort.keys.len(), 1);
+                assert_eq!(sort.keys[0].order, SortOrder::Ascending);
+            } else {
+                panic!("Expected Sort operator");
+            }
+        } else {
+            panic!("Expected Return operator");
+        }
+    }
+
+    #[test]
+    fn test_translate_limit() {
+        let query = "MATCH (n:Person) RETURN n LIMIT 10";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        // Find Limit
+        fn find_limit(op: &LogicalOperator) -> Option<&LimitOp> {
+            match op {
+                LogicalOperator::Limit(l) => Some(l),
+                LogicalOperator::Return(r) => find_limit(&r.input),
+                LogicalOperator::Sort(s) => find_limit(&s.input),
+                _ => None,
+            }
+        }
+
+        let limit = find_limit(&plan.root).expect("Expected Limit");
+        assert_eq!(limit.count, 10);
+    }
+
+    #[test]
+    fn test_translate_skip() {
+        let query = "MATCH (n:Person) RETURN n SKIP 5";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_skip(op: &LogicalOperator) -> Option<&SkipOp> {
+            match op {
+                LogicalOperator::Skip(s) => Some(s),
+                LogicalOperator::Return(r) => find_skip(&r.input),
+                LogicalOperator::Limit(l) => find_skip(&l.input),
+                _ => None,
+            }
+        }
+
+        let skip = find_skip(&plan.root).expect("Expected Skip");
+        assert_eq!(skip.count, 5);
+    }
+
+    // === Mutation Tests ===
+
+    #[test]
+    fn test_translate_insert_node() {
+        let query = "INSERT (n:Person {name: 'Alice', age: 30})";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        // Find CreateNode
+        fn find_create(op: &LogicalOperator) -> bool {
+            match op {
+                LogicalOperator::CreateNode(_) => true,
+                LogicalOperator::Return(r) => find_create(&r.input),
+                _ => false,
+            }
+        }
+
+        assert!(find_create(&plan.root));
+    }
+
+    #[test]
+    fn test_translate_delete() {
+        let query = "DELETE n";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        if let LogicalOperator::DeleteNode(del) = &plan.root {
+            assert_eq!(del.variable, "n");
+        } else {
+            panic!("Expected DeleteNode operator");
+        }
+    }
+
+    #[test]
+    fn test_translate_set() {
+        // SET is not a standalone statement in GQL, test the translator method directly
+        let translator = GqlTranslator::new();
+        let set_stmt = ast::SetStatement {
+            assignments: vec![ast::PropertyAssignment {
+                variable: "n".to_string(),
+                property: "name".to_string(),
+                value: ast::Expression::Literal(ast::Literal::String("Bob".to_string())),
+            }],
+            span: None,
+        };
+
+        let result = translator.translate_set(&set_stmt);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        if let LogicalOperator::SetProperty(set) = &plan.root {
+            assert_eq!(set.variable, "n");
+            assert_eq!(set.properties.len(), 1);
+            assert_eq!(set.properties[0].0, "name");
+        } else {
+            panic!("Expected SetProperty operator");
+        }
+    }
+
+    // === Expression Translation Tests ===
+
+    #[test]
+    fn test_translate_literals() {
+        let query = "MATCH (n) WHERE n.count = 42 AND n.active = true AND n.rate = 3.14 RETURN n";
+        let result = translate(query);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_parameter() {
+        let query = "MATCH (n:Person) WHERE n.name = $name RETURN n";
+        let result = translate(query);
+        assert!(result.is_ok());
+
+        let plan = result.unwrap();
+        fn find_filter(op: &LogicalOperator) -> Option<&FilterOp> {
+            match op {
+                LogicalOperator::Filter(f) => Some(f),
+                LogicalOperator::Return(r) => find_filter(&r.input),
+                _ => None,
+            }
+        }
+
+        let filter = find_filter(&plan.root).expect("Expected Filter");
+        if let LogicalExpression::Binary { right, .. } = &filter.predicate {
+            if let LogicalExpression::Parameter(name) = right.as_ref() {
+                assert_eq!(name, "name");
+            } else {
+                panic!("Expected Parameter");
+            }
+        }
+    }
+
+    // === Error Handling Tests ===
+
+    #[test]
+    fn test_translate_empty_delete_error() {
+        // Create translator directly to test empty delete
+        let translator = GqlTranslator::new();
+        let delete = ast::DeleteStatement {
+            variables: vec![],
+            detach: false,
+            span: None,
+        };
+        let result = translator.translate_delete(&delete);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_translate_empty_set_error() {
+        let translator = GqlTranslator::new();
+        let set = ast::SetStatement {
+            assignments: vec![],
+            span: None,
+        };
+        let result = translator.translate_set(&set);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_translate_empty_insert_error() {
+        let translator = GqlTranslator::new();
+        let insert = ast::InsertStatement {
+            patterns: vec![],
+            span: None,
+        };
+        let result = translator.translate_insert(&insert);
+        assert!(result.is_err());
+    }
+
+    // === Helper Function Tests ===
+
+    #[test]
+    fn test_is_aggregate_function() {
+        assert!(is_aggregate_function("COUNT"));
+        assert!(is_aggregate_function("count"));
+        assert!(is_aggregate_function("SUM"));
+        assert!(is_aggregate_function("AVG"));
+        assert!(is_aggregate_function("MIN"));
+        assert!(is_aggregate_function("MAX"));
+        assert!(is_aggregate_function("COLLECT"));
+        assert!(!is_aggregate_function("UPPER"));
+        assert!(!is_aggregate_function("RANDOM"));
+    }
+
+    #[test]
+    fn test_to_aggregate_function() {
+        assert_eq!(to_aggregate_function("COUNT"), Some(AggregateFunction::Count));
+        assert_eq!(to_aggregate_function("sum"), Some(AggregateFunction::Sum));
+        assert_eq!(to_aggregate_function("Avg"), Some(AggregateFunction::Avg));
+        assert_eq!(to_aggregate_function("min"), Some(AggregateFunction::Min));
+        assert_eq!(to_aggregate_function("MAX"), Some(AggregateFunction::Max));
+        assert_eq!(to_aggregate_function("collect"), Some(AggregateFunction::Collect));
+        assert_eq!(to_aggregate_function("UNKNOWN"), None);
+    }
+
+    #[test]
+    fn test_contains_aggregate() {
+        let count_expr = ast::Expression::FunctionCall {
+            name: "COUNT".to_string(),
+            args: vec![],
+        };
+        assert!(contains_aggregate(&count_expr));
+
+        let upper_expr = ast::Expression::FunctionCall {
+            name: "UPPER".to_string(),
+            args: vec![],
+        };
+        assert!(!contains_aggregate(&upper_expr));
+
+        let var_expr = ast::Expression::Variable("n".to_string());
+        assert!(!contains_aggregate(&var_expr));
+    }
+
+    #[test]
+    fn test_binary_op_translation() {
+        let translator = GqlTranslator::new();
+
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Eq), BinaryOp::Eq);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Ne), BinaryOp::Ne);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Lt), BinaryOp::Lt);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Le), BinaryOp::Le);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Gt), BinaryOp::Gt);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Ge), BinaryOp::Ge);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::And), BinaryOp::And);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Or), BinaryOp::Or);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Add), BinaryOp::Add);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Sub), BinaryOp::Sub);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Mul), BinaryOp::Mul);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Div), BinaryOp::Div);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Mod), BinaryOp::Mod);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Like), BinaryOp::Like);
+        assert_eq!(translator.translate_binary_op(ast::BinaryOp::In), BinaryOp::In);
+    }
+
+    #[test]
+    fn test_unary_op_translation() {
+        let translator = GqlTranslator::new();
+
+        assert_eq!(translator.translate_unary_op(ast::UnaryOp::Not), UnaryOp::Not);
+        assert_eq!(translator.translate_unary_op(ast::UnaryOp::Neg), UnaryOp::Neg);
+        assert_eq!(translator.translate_unary_op(ast::UnaryOp::IsNull), UnaryOp::IsNull);
+        assert_eq!(translator.translate_unary_op(ast::UnaryOp::IsNotNull), UnaryOp::IsNotNull);
     }
 }

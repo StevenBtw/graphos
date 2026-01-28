@@ -4,9 +4,39 @@
 //! - `HashAggregateOperator`: Hash-based grouping with aggregation functions
 //! - Various aggregation functions: COUNT, SUM, AVG, MIN, MAX, etc.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use graphos_common::types::{LogicalType, Value};
+
+/// A wrapper for Value that can be hashed (for DISTINCT tracking).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum HashableValue {
+    Null,
+    Bool(bool),
+    Int64(i64),
+    Float64Bits(u64),
+    String(String),
+    Other(String),
+}
+
+impl From<&Value> for HashableValue {
+    fn from(v: &Value) -> Self {
+        match v {
+            Value::Null => HashableValue::Null,
+            Value::Bool(b) => HashableValue::Bool(*b),
+            Value::Int64(i) => HashableValue::Int64(*i),
+            Value::Float64(f) => HashableValue::Float64Bits(f.to_bits()),
+            Value::String(s) => HashableValue::String(s.to_string()),
+            other => HashableValue::Other(format!("{other:?}")),
+        }
+    }
+}
+
+impl From<Value> for HashableValue {
+    fn from(v: Value) -> Self {
+        Self::from(&v)
+    }
+}
 
 use super::{Operator, OperatorError, OperatorResult};
 use crate::execution::chunk::DataChunkBuilder;
@@ -157,12 +187,20 @@ impl AggregateExpr {
 enum AggregateState {
     /// Count state.
     Count(i64),
+    /// Count distinct state (count, seen values).
+    CountDistinct(i64, HashSet<HashableValue>),
     /// Sum state (integer).
     SumInt(i64),
+    /// Sum distinct state (integer, seen values).
+    SumIntDistinct(i64, HashSet<HashableValue>),
     /// Sum state (float).
     SumFloat(f64),
+    /// Sum distinct state (float, seen values).
+    SumFloatDistinct(f64, HashSet<HashableValue>),
     /// Average state (sum, count).
     Avg(f64, i64),
+    /// Average distinct state (sum, count, seen values).
+    AvgDistinct(f64, i64, HashSet<HashableValue>),
     /// Min state.
     Min(Option<Value>),
     /// Max state.
@@ -173,20 +211,36 @@ enum AggregateState {
     Last(Option<Value>),
     /// Collect state.
     Collect(Vec<Value>),
+    /// Collect distinct state (values, seen).
+    CollectDistinct(Vec<Value>, HashSet<HashableValue>),
 }
 
 impl AggregateState {
     /// Creates initial state for an aggregation function.
-    fn new(function: AggregateFunction) -> Self {
-        match function {
-            AggregateFunction::Count | AggregateFunction::CountNonNull => AggregateState::Count(0),
-            AggregateFunction::Sum => AggregateState::SumInt(0),
-            AggregateFunction::Avg => AggregateState::Avg(0.0, 0),
-            AggregateFunction::Min => AggregateState::Min(None),
-            AggregateFunction::Max => AggregateState::Max(None),
-            AggregateFunction::First => AggregateState::First(None),
-            AggregateFunction::Last => AggregateState::Last(None),
-            AggregateFunction::Collect => AggregateState::Collect(Vec::new()),
+    fn new(function: AggregateFunction, distinct: bool) -> Self {
+        match (function, distinct) {
+            (AggregateFunction::Count | AggregateFunction::CountNonNull, false) => {
+                AggregateState::Count(0)
+            }
+            (AggregateFunction::Count | AggregateFunction::CountNonNull, true) => {
+                AggregateState::CountDistinct(0, HashSet::new())
+            }
+            (AggregateFunction::Sum, false) => AggregateState::SumInt(0),
+            (AggregateFunction::Sum, true) => {
+                AggregateState::SumIntDistinct(0, HashSet::new())
+            }
+            (AggregateFunction::Avg, false) => AggregateState::Avg(0.0, 0),
+            (AggregateFunction::Avg, true) => {
+                AggregateState::AvgDistinct(0.0, 0, HashSet::new())
+            }
+            (AggregateFunction::Min, _) => AggregateState::Min(None), // MIN/MAX don't need distinct
+            (AggregateFunction::Max, _) => AggregateState::Max(None),
+            (AggregateFunction::First, _) => AggregateState::First(None),
+            (AggregateFunction::Last, _) => AggregateState::Last(None),
+            (AggregateFunction::Collect, false) => AggregateState::Collect(Vec::new()),
+            (AggregateFunction::Collect, true) => {
+                AggregateState::CollectDistinct(Vec::new(), HashSet::new())
+            }
         }
     }
 
@@ -196,12 +250,34 @@ impl AggregateState {
             AggregateState::Count(count) => {
                 *count += 1;
             }
+            AggregateState::CountDistinct(count, seen) => {
+                if let Some(ref v) = value {
+                    let hashable = HashableValue::from(v);
+                    if seen.insert(hashable) {
+                        *count += 1;
+                    }
+                }
+            }
             AggregateState::SumInt(sum) => {
                 if let Some(Value::Int64(v)) = value {
                     *sum += v;
                 } else if let Some(Value::Float64(v)) = value {
                     // Convert to float sum
                     *self = AggregateState::SumFloat(*sum as f64 + v);
+                }
+            }
+            AggregateState::SumIntDistinct(sum, seen) => {
+                if let Some(ref v) = value {
+                    let hashable = HashableValue::from(v);
+                    if seen.insert(hashable) {
+                        if let Value::Int64(i) = v {
+                            *sum += i;
+                        } else if let Value::Float64(f) = v {
+                            // Convert to float distinct
+                            let seen_clone = seen.clone();
+                            *self = AggregateState::SumFloatDistinct(*sum as f64 + f, seen_clone);
+                        }
+                    }
                 }
             }
             AggregateState::SumFloat(sum) => {
@@ -211,11 +287,32 @@ impl AggregateState {
                     *sum += v;
                 }
             }
+            AggregateState::SumFloatDistinct(sum, seen) => {
+                if let Some(ref v) = value {
+                    let hashable = HashableValue::from(v);
+                    if seen.insert(hashable) {
+                        if let Some(num) = value_to_f64(v) {
+                            *sum += num;
+                        }
+                    }
+                }
+            }
             AggregateState::Avg(sum, count) => {
                 if let Some(ref v) = value {
                     if let Some(num) = value_to_f64(v) {
                         *sum += num;
                         *count += 1;
+                    }
+                }
+            }
+            AggregateState::AvgDistinct(sum, count, seen) => {
+                if let Some(ref v) = value {
+                    let hashable = HashableValue::from(v);
+                    if seen.insert(hashable) {
+                        if let Some(num) = value_to_f64(v) {
+                            *sum += num;
+                            *count += 1;
+                        }
                     }
                 }
             }
@@ -258,16 +355,30 @@ impl AggregateState {
                     list.push(v);
                 }
             }
+            AggregateState::CollectDistinct(list, seen) => {
+                if let Some(v) = value {
+                    let hashable = HashableValue::from(&v);
+                    if seen.insert(hashable) {
+                        list.push(v);
+                    }
+                }
+            }
         }
     }
 
     /// Finalizes the state and returns the result value.
     fn finalize(&self) -> Value {
         match self {
-            AggregateState::Count(count) => Value::Int64(*count),
-            AggregateState::SumInt(sum) => Value::Int64(*sum),
-            AggregateState::SumFloat(sum) => Value::Float64(*sum),
-            AggregateState::Avg(sum, count) => {
+            AggregateState::Count(count) | AggregateState::CountDistinct(count, _) => {
+                Value::Int64(*count)
+            }
+            AggregateState::SumInt(sum) | AggregateState::SumIntDistinct(sum, _) => {
+                Value::Int64(*sum)
+            }
+            AggregateState::SumFloat(sum) | AggregateState::SumFloatDistinct(sum, _) => {
+                Value::Float64(*sum)
+            }
+            AggregateState::Avg(sum, count) | AggregateState::AvgDistinct(sum, count, _) => {
                 if *count == 0 {
                     Value::Null
                 } else {
@@ -278,7 +389,9 @@ impl AggregateState {
             AggregateState::Max(max) => max.clone().unwrap_or(Value::Null),
             AggregateState::First(first) => first.clone().unwrap_or(Value::Null),
             AggregateState::Last(last) => last.clone().unwrap_or(Value::Null),
-            AggregateState::Collect(list) => Value::List(list.clone().into()),
+            AggregateState::Collect(list) | AggregateState::CollectDistinct(list, _) => {
+                Value::List(list.clone().into())
+            }
         }
     }
 }
@@ -409,7 +522,7 @@ impl HashAggregateOperator {
                 let states = self.groups.entry(key).or_insert_with(|| {
                     self.aggregates
                         .iter()
-                        .map(|agg| AggregateState::new(agg.function))
+                        .map(|agg| AggregateState::new(agg.function, agg.distinct))
                         .collect()
                 });
 
@@ -463,7 +576,7 @@ impl Operator for HashAggregateOperator {
             let mut builder = DataChunkBuilder::with_capacity(&self.output_schema, 1);
 
             for agg in &self.aggregates {
-                let state = AggregateState::new(agg.function);
+                let state = AggregateState::new(agg.function, agg.distinct);
                 let value = state.finalize();
                 if let Some(col) = builder.column_mut(self.group_columns.len()) {
                     col.push_value(value);
@@ -550,7 +663,7 @@ impl SimpleAggregateOperator {
     ) -> Self {
         let states = aggregates
             .iter()
-            .map(|agg| AggregateState::new(agg.function))
+            .map(|agg| AggregateState::new(agg.function, agg.distinct))
             .collect();
 
         Self {
@@ -616,7 +729,7 @@ impl Operator for SimpleAggregateOperator {
         self.states = self
             .aggregates
             .iter()
-            .map(|agg| AggregateState::new(agg.function))
+            .map(|agg| AggregateState::new(agg.function, agg.distinct))
             .collect();
         self.done = false;
     }
@@ -847,5 +960,101 @@ mod tests {
         assert_eq!(results[1].1, 3);
         assert_eq!(results[1].2, 120);
         assert!((results[1].3 - 40.0).abs() < 0.001);
+    }
+
+    fn create_test_chunk_with_duplicates() -> DataChunk {
+        // Create data with duplicate values in column 1
+        // [(group, value)] = [(1, 10), (1, 10), (1, 20), (2, 30), (2, 30), (2, 30)]
+        // GROUP 1: values [10, 10, 20] -> distinct count = 2
+        // GROUP 2: values [30, 30, 30] -> distinct count = 1
+        let mut builder = DataChunkBuilder::new(&[LogicalType::Int64, LogicalType::Int64]);
+
+        let data = [(1i64, 10i64), (1, 10), (1, 20), (2, 30), (2, 30), (2, 30)];
+        for (group, value) in data {
+            builder.column_mut(0).unwrap().push_int64(group);
+            builder.column_mut(1).unwrap().push_int64(value);
+            builder.advance_row();
+        }
+
+        builder.finish()
+    }
+
+    #[test]
+    fn test_count_distinct() {
+        let mock = MockOperator::new(vec![create_test_chunk_with_duplicates()]);
+
+        // COUNT(DISTINCT column 1)
+        let mut agg = SimpleAggregateOperator::new(
+            Box::new(mock),
+            vec![AggregateExpr::count(1).with_distinct()],
+            vec![LogicalType::Int64],
+        );
+
+        let result = agg.next().unwrap().unwrap();
+        assert_eq!(result.row_count(), 1);
+        // Total distinct values: 10, 20, 30 = 3 distinct values
+        assert_eq!(result.column(0).unwrap().get_int64(0), Some(3));
+    }
+
+    #[test]
+    fn test_grouped_count_distinct() {
+        let mock = MockOperator::new(vec![create_test_chunk_with_duplicates()]);
+
+        // GROUP BY column 0, COUNT(DISTINCT column 1)
+        let mut agg = HashAggregateOperator::new(
+            Box::new(mock),
+            vec![0],
+            vec![AggregateExpr::count(1).with_distinct()],
+            vec![LogicalType::Int64, LogicalType::Int64],
+        );
+
+        let mut results: Vec<(i64, i64)> = Vec::new();
+        while let Some(chunk) = agg.next().unwrap() {
+            for row in chunk.selected_indices() {
+                let group = chunk.column(0).unwrap().get_int64(row).unwrap();
+                let count = chunk.column(1).unwrap().get_int64(row).unwrap();
+                results.push((group, count));
+            }
+        }
+
+        results.sort_by_key(|(g, _)| *g);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0], (1, 2)); // Group 1: [10, 10, 20] -> 2 distinct values
+        assert_eq!(results[1], (2, 1)); // Group 2: [30, 30, 30] -> 1 distinct value
+    }
+
+    #[test]
+    fn test_sum_distinct() {
+        let mock = MockOperator::new(vec![create_test_chunk_with_duplicates()]);
+
+        // SUM(DISTINCT column 1)
+        let mut agg = SimpleAggregateOperator::new(
+            Box::new(mock),
+            vec![AggregateExpr::sum(1).with_distinct()],
+            vec![LogicalType::Int64],
+        );
+
+        let result = agg.next().unwrap().unwrap();
+        assert_eq!(result.row_count(), 1);
+        // Sum of distinct values: 10 + 20 + 30 = 60
+        assert_eq!(result.column(0).unwrap().get_int64(0), Some(60));
+    }
+
+    #[test]
+    fn test_avg_distinct() {
+        let mock = MockOperator::new(vec![create_test_chunk_with_duplicates()]);
+
+        // AVG(DISTINCT column 1)
+        let mut agg = SimpleAggregateOperator::new(
+            Box::new(mock),
+            vec![AggregateExpr::avg(1).with_distinct()],
+            vec![LogicalType::Float64],
+        );
+
+        let result = agg.next().unwrap().unwrap();
+        assert_eq!(result.row_count(), 1);
+        // Avg of distinct values: (10 + 20 + 30) / 3 = 20.0
+        let avg = result.column(0).unwrap().get_float64(0).unwrap();
+        assert!((avg - 20.0).abs() < 0.001);
     }
 }

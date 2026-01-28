@@ -15,7 +15,7 @@ mod query;
 mod types;
 
 use bridges::{PyAlgorithms, PyNetworkXAdapter, PySolvORAdapter};
-use database::PyGraphosDB;
+use database::{AsyncQueryResult, AsyncQueryResultIter, PyGraphosDB};
 use graph::{PyEdge, PyNode};
 use query::PyQueryResult;
 use types::PyValue;
@@ -27,6 +27,8 @@ fn graphos(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyNode>()?;
     m.add_class::<PyEdge>()?;
     m.add_class::<PyQueryResult>()?;
+    m.add_class::<AsyncQueryResult>()?;
+    m.add_class::<AsyncQueryResultIter>()?;
     m.add_class::<PyValue>()?;
     m.add_class::<PyAlgorithms>()?;
     m.add_class::<PyNetworkXAdapter>()?;

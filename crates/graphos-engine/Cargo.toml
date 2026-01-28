@@ -47,7 +47,8 @@ cypher = ["graphos-adapters/cypher"]
 sparql = ["graphos-adapters/sparql"]
 gremlin = ["graphos-adapters/gremlin"]
 graphql = ["graphos-adapters/graphql"]
-full = ["gql", "cypher", "sparql", "gremlin", "graphql"]
+rdf = ["graphos-core/rdf", "graphos-adapters/rdf"]  # RDF graph model and planner
+full = ["gql", "cypher", "sparql", "gremlin", "graphql", "rdf"]
 
 [lints]
 workspace = true

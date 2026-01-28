@@ -229,22 +229,22 @@ impl PyNetworkXAdapter {
         use graphos_engine::config::Config;
 
         // Create new in-memory database
-        let db = GraphosDB::with_config(Config::in_memory());
+        let db = GraphosDB::with_config(Config::in_memory())
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
         let db = Arc::new(RwLock::new(db));
 
         // Check if directed
         let is_directed: bool = g.call_method0("is_directed")?.extract()?;
 
-        // Import nodes
-        let nodes = g.call_method0("nodes")?;
+        // Import nodes with data
+        let nodes_data = g.call_method1("nodes", (true,))?; // nodes(data=True)
         let mut node_map: HashMap<i64, NodeId> = HashMap::new();
 
-        for node in nodes.try_iter()? {
-            let node = node?;
-            let py_id: i64 = node.extract()?;
-
-            // Get node attributes by indexing the graph
-            let node_data = g.get_item(py_id)?;
+        for item in nodes_data.try_iter()? {
+            let item = item?;
+            let tuple: &Bound<'_, PyTuple> = item.cast()?;
+            let py_id: i64 = tuple.get_item(0)?.extract()?;
+            let node_data = tuple.get_item(1)?;
 
             let db_guard = db.read();
 
@@ -258,28 +258,60 @@ impl PyNetworkXAdapter {
             let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
             let graphos_id = db_guard.create_node(&label_refs);
             node_map.insert(py_id, graphos_id);
+
+            // Import all properties except "labels"
+            if let Ok(dict) = node_data.cast::<pyo3::types::PyDict>() {
+                for (key, value) in dict.iter() {
+                    let key_str: String = match key.extract() {
+                        Ok(k) => k,
+                        Err(_) => continue,
+                    };
+                    if key_str == "labels" {
+                        continue; // Skip labels, already handled
+                    }
+                    if let Ok(val) = crate::types::PyValue::from_py(&value) {
+                        db_guard.set_node_property(graphos_id, &key_str, val);
+                    }
+                }
+            }
         }
 
-        // Import edges
-        let edges = g.call_method0("edges")?;
-        for edge in edges.try_iter()? {
-            let edge = edge?;
-            let edge_tuple: &Bound<'_, PyTuple> = edge.downcast_exact()?;
-            let src: i64 = edge_tuple.get_item(0)?.extract()?;
-            let dst: i64 = edge_tuple.get_item(1)?.extract()?;
+        // Import edges with data
+        let edges_data = g.call_method1("edges", (true,))?; // edges(data=True)
+        for item in edges_data.try_iter()? {
+            let item = item?;
+            let tuple: &Bound<'_, PyTuple> = item.cast()?;
+            let src: i64 = tuple.get_item(0)?.extract()?;
+            let dst: i64 = tuple.get_item(1)?.extract()?;
+            let edge_data = tuple.get_item(2)?;
 
             if let (Some(&src_id), Some(&dst_id)) = (node_map.get(&src), node_map.get(&dst)) {
                 let db_guard = db.read();
 
-                // Get edge attributes
-                let edge_data = g.get_item((src, dst))?;
+                // Get edge type
                 let edge_type: String = if let Ok(t) = edge_data.get_item("type") {
                     t.extract().unwrap_or_else(|_| "EDGE".to_string())
                 } else {
                     "EDGE".to_string()
                 };
 
-                db_guard.create_edge(src_id, dst_id, &edge_type);
+                let edge_id = db_guard.create_edge(src_id, dst_id, &edge_type);
+
+                // Import all properties except "type"
+                if let Ok(dict) = edge_data.cast::<pyo3::types::PyDict>() {
+                    for (key, value) in dict.iter() {
+                        let key_str: String = match key.extract() {
+                            Ok(k) => k,
+                            Err(_) => continue,
+                        };
+                        if key_str == "type" {
+                            continue; // Skip type, already handled
+                        }
+                        if let Ok(val) = crate::types::PyValue::from_py(&value) {
+                            db_guard.set_edge_property(edge_id, &key_str, val);
+                        }
+                    }
+                }
             }
         }
 

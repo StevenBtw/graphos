@@ -6,8 +6,9 @@ use crate::graph::Direction;
 use crate::index::adjacency::ChunkedAdjacency;
 use crate::index::zone_map::ZoneMapEntry;
 use crate::statistics::{EdgeTypeStatistics, LabelStatistics, Statistics};
-use graphos_common::types::{EdgeId, EpochId, NodeId, PropertyKey, Value};
-use graphos_common::utils::hash::FxHashMap;
+use graphos_common::mvcc::VersionChain;
+use graphos_common::types::{EdgeId, EpochId, NodeId, PropertyKey, TxId, Value};
+use graphos_common::utils::hash::{FxHashMap, FxHashSet};
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -42,11 +43,11 @@ pub struct LpgStore {
     #[allow(dead_code)]
     config: LpgStoreConfig,
 
-    /// Node records indexed by NodeId.
-    nodes: RwLock<FxHashMap<NodeId, NodeRecord>>,
+    /// Node records indexed by NodeId, with version chains for MVCC.
+    nodes: RwLock<FxHashMap<NodeId, VersionChain<NodeRecord>>>,
 
-    /// Edge records indexed by EdgeId.
-    edges: RwLock<FxHashMap<EdgeId, EdgeRecord>>,
+    /// Edge records indexed by EdgeId, with version chains for MVCC.
+    edges: RwLock<FxHashMap<EdgeId, VersionChain<EdgeRecord>>>,
 
     /// Property storage for nodes.
     node_properties: PropertyStorage<NodeId>,
@@ -55,7 +56,7 @@ pub struct LpgStore {
     edge_properties: PropertyStorage<EdgeId>,
 
     /// Label name to ID mapping.
-    label_to_id: RwLock<FxHashMap<Arc<str>, u8>>,
+    label_to_id: RwLock<FxHashMap<Arc<str>, u32>>,
 
     /// Label ID to name mapping.
     id_to_label: RwLock<Vec<Arc<str>>>,
@@ -75,6 +76,10 @@ pub struct LpgStore {
 
     /// Label index: label_id -> set of node IDs.
     label_index: RwLock<Vec<FxHashMap<NodeId, ()>>>,
+
+    /// Node labels: node_id -> set of label IDs.
+    /// Reverse mapping to efficiently get labels for a node.
+    node_labels: RwLock<FxHashMap<NodeId, FxHashSet<u32>>>,
 
     /// Next node ID.
     next_node_id: AtomicU64,
@@ -117,6 +122,7 @@ impl LpgStore {
             forward_adj: ChunkedAdjacency::new(),
             backward_adj,
             label_index: RwLock::new(Vec::new()),
+            node_labels: RwLock::new(FxHashMap::default()),
             next_node_id: AtomicU64::new(0),
             next_edge_id: AtomicU64::new(0),
             current_epoch: AtomicU64::new(0),
@@ -140,16 +146,29 @@ impl LpgStore {
     // === Node Operations ===
 
     /// Creates a new node with the given labels.
+    ///
+    /// Uses the system transaction for non-transactional operations.
     pub fn create_node(&self, labels: &[&str]) -> NodeId {
+        self.create_node_versioned(labels, self.current_epoch(), TxId::SYSTEM)
+    }
+
+    /// Creates a new node with the given labels within a transaction context.
+    pub fn create_node_versioned(
+        &self,
+        labels: &[&str],
+        epoch: EpochId,
+        tx_id: TxId,
+    ) -> NodeId {
         let id = NodeId::new(self.next_node_id.fetch_add(1, Ordering::Relaxed));
-        let epoch = self.current_epoch();
 
         let mut record = NodeRecord::new(id, epoch);
+        record.set_label_count(labels.len() as u16);
 
-        // Set label bits
+        // Store labels in node_labels map and label_index
+        let mut node_label_set = FxHashSet::default();
         for label in labels {
             let label_id = self.get_or_create_label_id(*label);
-            record.set_label_bit(label_id);
+            node_label_set.insert(label_id);
 
             // Update label index
             let mut index = self.label_index.write();
@@ -159,7 +178,12 @@ impl LpgStore {
             index[label_id as usize].insert(id, ());
         }
 
-        self.nodes.write().insert(id, record);
+        // Store node's labels
+        self.node_labels.write().insert(id, node_label_set);
+
+        // Create version chain with initial version
+        let chain = VersionChain::with_initial(record, epoch, tx_id);
+        self.nodes.write().insert(id, chain);
         id
     }
 
@@ -169,7 +193,23 @@ impl LpgStore {
         labels: &[&str],
         properties: impl IntoIterator<Item = (impl Into<PropertyKey>, impl Into<Value>)>,
     ) -> NodeId {
-        let id = self.create_node(labels);
+        self.create_node_with_props_versioned(
+            labels,
+            properties,
+            self.current_epoch(),
+            TxId::SYSTEM,
+        )
+    }
+
+    /// Creates a new node with labels and properties within a transaction context.
+    pub fn create_node_with_props_versioned(
+        &self,
+        labels: &[&str],
+        properties: impl IntoIterator<Item = (impl Into<PropertyKey>, impl Into<Value>)>,
+        epoch: EpochId,
+        tx_id: TxId,
+    ) -> NodeId {
+        let id = self.create_node_versioned(labels, epoch, tx_id);
 
         for (key, value) in properties {
             self.node_properties.set(id, key.into(), value.into());
@@ -177,18 +217,27 @@ impl LpgStore {
 
         // Update props_count in record
         let count = self.node_properties.get_all(id).len() as u16;
-        if let Some(record) = self.nodes.write().get_mut(&id) {
-            record.props_count = count;
+        if let Some(chain) = self.nodes.write().get_mut(&id) {
+            if let Some(record) = chain.latest_mut() {
+                record.props_count = count;
+            }
         }
 
         id
     }
 
-    /// Gets a node by ID.
+    /// Gets a node by ID (latest visible version).
     #[must_use]
     pub fn get_node(&self, id: NodeId) -> Option<Node> {
+        self.get_node_at_epoch(id, self.current_epoch())
+    }
+
+    /// Gets a node by ID at a specific epoch.
+    #[must_use]
+    pub fn get_node_at_epoch(&self, id: NodeId, epoch: EpochId) -> Option<Node> {
         let nodes = self.nodes.read();
-        let record = nodes.get(&id)?;
+        let chain = nodes.get(&id)?;
+        let record = chain.visible_at(epoch)?;
 
         if record.is_deleted() {
             return None;
@@ -196,11 +245,14 @@ impl LpgStore {
 
         let mut node = Node::new(id);
 
-        // Get labels
+        // Get labels from node_labels map
         let id_to_label = self.id_to_label.read();
-        for bit in record.label_bits_iter() {
-            if let Some(label) = id_to_label.get(bit as usize) {
-                node.labels.push(label.clone());
+        let node_labels = self.node_labels.read();
+        if let Some(label_ids) = node_labels.get(&id) {
+            for &label_id in label_ids {
+                if let Some(label) = id_to_label.get(label_id as usize) {
+                    node.labels.push(label.clone());
+                }
             }
         }
 
@@ -210,29 +262,76 @@ impl LpgStore {
         Some(node)
     }
 
-    /// Deletes a node and all its edges.
+    /// Gets a node visible to a specific transaction.
+    #[must_use]
+    pub fn get_node_versioned(&self, id: NodeId, epoch: EpochId, tx_id: TxId) -> Option<Node> {
+        let nodes = self.nodes.read();
+        let chain = nodes.get(&id)?;
+        let record = chain.visible_to(epoch, tx_id)?;
+
+        if record.is_deleted() {
+            return None;
+        }
+
+        let mut node = Node::new(id);
+
+        // Get labels from node_labels map
+        let id_to_label = self.id_to_label.read();
+        let node_labels = self.node_labels.read();
+        if let Some(label_ids) = node_labels.get(&id) {
+            for &label_id in label_ids {
+                if let Some(label) = id_to_label.get(label_id as usize) {
+                    node.labels.push(label.clone());
+                }
+            }
+        }
+
+        // Get properties
+        node.properties = self.node_properties.get_all(id).into_iter().collect();
+
+        Some(node)
+    }
+
+    /// Deletes a node and all its edges (using latest epoch).
     pub fn delete_node(&self, id: NodeId) -> bool {
+        self.delete_node_at_epoch(id, self.current_epoch())
+    }
+
+    /// Deletes a node at a specific epoch.
+    pub fn delete_node_at_epoch(&self, id: NodeId, epoch: EpochId) -> bool {
         let mut nodes = self.nodes.write();
-        if let Some(record) = nodes.get_mut(&id) {
-            if record.is_deleted() {
+        if let Some(chain) = nodes.get_mut(&id) {
+            // Check if visible at this epoch (not already deleted)
+            if let Some(record) = chain.visible_at(epoch) {
+                if record.is_deleted() {
+                    return false;
+                }
+            } else {
+                // Not visible at this epoch (already deleted or doesn't exist)
                 return false;
             }
 
-            record.set_deleted(true);
+            // Mark the version chain as deleted at this epoch
+            chain.mark_deleted(epoch);
 
-            // Remove from label index
+            // Remove from label index using node_labels map
             let mut index = self.label_index.write();
-            for bit in record.label_bits_iter() {
-                if let Some(set) = index.get_mut(bit as usize) {
-                    set.remove(&id);
+            let mut node_labels = self.node_labels.write();
+            if let Some(label_ids) = node_labels.remove(&id) {
+                for label_id in label_ids {
+                    if let Some(set) = index.get_mut(label_id as usize) {
+                        set.remove(&id);
+                    }
                 }
             }
 
             // Remove properties
             drop(nodes); // Release lock before removing properties
+            drop(index);
+            drop(node_labels);
             self.node_properties.remove_all(id);
 
-            // FIXME(delete-node): Delete incident edges when removing node
+            // Note: Caller should use delete_node_edges() first if detach is needed
 
             true
         } else {
@@ -240,12 +339,202 @@ impl LpgStore {
         }
     }
 
-    /// Returns the number of nodes.
+    /// Deletes all edges connected to a node (for DETACH DELETE).
+    pub fn delete_node_edges(&self, node_id: NodeId) {
+        // Get outgoing edges
+        let outgoing: Vec<EdgeId> = self
+            .forward_adj
+            .edges_from(node_id)
+            .into_iter()
+            .map(|(_, edge_id)| edge_id)
+            .collect();
+
+        // Get incoming edges
+        let incoming: Vec<EdgeId> = if let Some(ref backward) = self.backward_adj {
+            backward
+                .edges_from(node_id)
+                .into_iter()
+                .map(|(_, edge_id)| edge_id)
+                .collect()
+        } else {
+            // No backward adjacency - scan all edges
+            let epoch = self.current_epoch();
+            self.edges
+                .read()
+                .iter()
+                .filter_map(|(id, chain)| {
+                    chain.visible_at(epoch).and_then(|r| {
+                        if !r.is_deleted() && r.dst == node_id {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        };
+
+        // Delete all edges
+        for edge_id in outgoing.into_iter().chain(incoming) {
+            self.delete_edge(edge_id);
+        }
+    }
+
+    /// Sets a property on a node.
+    pub fn set_node_property(&self, id: NodeId, key: &str, value: Value) {
+        self.node_properties.set(id, key.into(), value);
+
+        // Update props_count in record
+        let count = self.node_properties.get_all(id).len() as u16;
+        if let Some(chain) = self.nodes.write().get_mut(&id) {
+            if let Some(record) = chain.latest_mut() {
+                record.props_count = count;
+            }
+        }
+    }
+
+    /// Sets a property on an edge.
+    pub fn set_edge_property(&self, id: EdgeId, key: &str, value: Value) {
+        self.edge_properties.set(id, key.into(), value);
+    }
+
+    /// Removes a property from a node.
+    ///
+    /// Returns the previous value if it existed, or None if the property didn't exist.
+    pub fn remove_node_property(&self, id: NodeId, key: &str) -> Option<Value> {
+        let result = self.node_properties.remove(id, &key.into());
+
+        // Update props_count in record
+        let count = self.node_properties.get_all(id).len() as u16;
+        if let Some(chain) = self.nodes.write().get_mut(&id) {
+            if let Some(record) = chain.latest_mut() {
+                record.props_count = count;
+            }
+        }
+
+        result
+    }
+
+    /// Removes a property from an edge.
+    ///
+    /// Returns the previous value if it existed, or None if the property didn't exist.
+    pub fn remove_edge_property(&self, id: EdgeId, key: &str) -> Option<Value> {
+        self.edge_properties.remove(id, &key.into())
+    }
+
+    /// Adds a label to a node.
+    ///
+    /// Returns true if the label was added, false if the node doesn't exist
+    /// or already has the label.
+    pub fn add_label(&self, node_id: NodeId, label: &str) -> bool {
+        let epoch = self.current_epoch();
+
+        // Check if node exists
+        let nodes = self.nodes.read();
+        if let Some(chain) = nodes.get(&node_id) {
+            if chain.visible_at(epoch).map_or(true, |r| r.is_deleted()) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        drop(nodes);
+
+        // Get or create label ID
+        let label_id = self.get_or_create_label_id(label);
+
+        // Add to node_labels map
+        let mut node_labels = self.node_labels.write();
+        let label_set = node_labels.entry(node_id).or_insert_with(FxHashSet::default);
+
+        if label_set.contains(&label_id) {
+            return false; // Already has this label
+        }
+
+        label_set.insert(label_id);
+        drop(node_labels);
+
+        // Add to label_index
+        let mut index = self.label_index.write();
+        if (label_id as usize) >= index.len() {
+            index.resize(label_id as usize + 1, FxHashMap::default());
+        }
+        index[label_id as usize].insert(node_id, ());
+
+        // Update label count in node record
+        if let Some(chain) = self.nodes.write().get_mut(&node_id) {
+            if let Some(record) = chain.latest_mut() {
+                let count = self.node_labels.read().get(&node_id).map_or(0, |s| s.len());
+                record.set_label_count(count as u16);
+            }
+        }
+
+        true
+    }
+
+    /// Removes a label from a node.
+    ///
+    /// Returns true if the label was removed, false if the node doesn't exist
+    /// or doesn't have the label.
+    pub fn remove_label(&self, node_id: NodeId, label: &str) -> bool {
+        let epoch = self.current_epoch();
+
+        // Check if node exists
+        let nodes = self.nodes.read();
+        if let Some(chain) = nodes.get(&node_id) {
+            if chain.visible_at(epoch).map_or(true, |r| r.is_deleted()) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        drop(nodes);
+
+        // Get label ID
+        let label_id = {
+            let label_ids = self.label_to_id.read();
+            match label_ids.get(label) {
+                Some(&id) => id,
+                None => return false, // Label doesn't exist
+            }
+        };
+
+        // Remove from node_labels map
+        let mut node_labels = self.node_labels.write();
+        if let Some(label_set) = node_labels.get_mut(&node_id) {
+            if !label_set.remove(&label_id) {
+                return false; // Node doesn't have this label
+            }
+        } else {
+            return false;
+        }
+        drop(node_labels);
+
+        // Remove from label_index
+        let mut index = self.label_index.write();
+        if (label_id as usize) < index.len() {
+            index[label_id as usize].remove(&node_id);
+        }
+
+        // Update label count in node record
+        if let Some(chain) = self.nodes.write().get_mut(&node_id) {
+            if let Some(record) = chain.latest_mut() {
+                let count = self.node_labels.read().get(&node_id).map_or(0, |s| s.len());
+                record.set_label_count(count as u16);
+            }
+        }
+
+        true
+    }
+
+    /// Returns the number of nodes (non-deleted at current epoch).
     #[must_use]
     pub fn node_count(&self) -> usize {
+        let epoch = self.current_epoch();
         self.nodes
             .read()
             .values()
+            .filter_map(|chain| chain.visible_at(epoch))
             .filter(|r| !r.is_deleted())
             .count()
     }
@@ -256,11 +545,19 @@ impl LpgStore {
     /// excludes deleted nodes.
     #[must_use]
     pub fn node_ids(&self) -> Vec<NodeId> {
+        let epoch = self.current_epoch();
         self.nodes
             .read()
             .iter()
-            .filter(|(_, r)| !r.is_deleted())
-            .map(|(id, _)| *id)
+            .filter_map(|(id, chain)| {
+                chain.visible_at(epoch).and_then(|r| {
+                    if !r.is_deleted() {
+                        Some(*id)
+                    } else {
+                        None
+                    }
+                })
+            })
             .collect()
     }
 
@@ -268,12 +565,24 @@ impl LpgStore {
 
     /// Creates a new edge.
     pub fn create_edge(&self, src: NodeId, dst: NodeId, edge_type: &str) -> EdgeId {
+        self.create_edge_versioned(src, dst, edge_type, self.current_epoch(), TxId::SYSTEM)
+    }
+
+    /// Creates a new edge within a transaction context.
+    pub fn create_edge_versioned(
+        &self,
+        src: NodeId,
+        dst: NodeId,
+        edge_type: &str,
+        epoch: EpochId,
+        tx_id: TxId,
+    ) -> EdgeId {
         let id = EdgeId::new(self.next_edge_id.fetch_add(1, Ordering::Relaxed));
-        let epoch = self.current_epoch();
         let type_id = self.get_or_create_edge_type_id(edge_type);
 
         let record = EdgeRecord::new(id, src, dst, type_id, epoch);
-        self.edges.write().insert(id, record);
+        let chain = VersionChain::with_initial(record, epoch, tx_id);
+        self.edges.write().insert(id, chain);
 
         // Update adjacency
         self.forward_adj.add_edge(src, dst, id);
@@ -301,11 +610,18 @@ impl LpgStore {
         id
     }
 
-    /// Gets an edge by ID.
+    /// Gets an edge by ID (latest visible version).
     #[must_use]
     pub fn get_edge(&self, id: EdgeId) -> Option<Edge> {
+        self.get_edge_at_epoch(id, self.current_epoch())
+    }
+
+    /// Gets an edge by ID at a specific epoch.
+    #[must_use]
+    pub fn get_edge_at_epoch(&self, id: EdgeId, epoch: EpochId) -> Option<Edge> {
         let edges = self.edges.read();
-        let record = edges.get(&id)?;
+        let chain = edges.get(&id)?;
+        let record = chain.visible_at(epoch)?;
 
         if record.is_deleted() {
             return None;
@@ -324,18 +640,54 @@ impl LpgStore {
         Some(edge)
     }
 
-    /// Deletes an edge.
+    /// Gets an edge visible to a specific transaction.
+    #[must_use]
+    pub fn get_edge_versioned(&self, id: EdgeId, epoch: EpochId, tx_id: TxId) -> Option<Edge> {
+        let edges = self.edges.read();
+        let chain = edges.get(&id)?;
+        let record = chain.visible_to(epoch, tx_id)?;
+
+        if record.is_deleted() {
+            return None;
+        }
+
+        let edge_type = {
+            let id_to_type = self.id_to_edge_type.read();
+            id_to_type.get(record.type_id as usize)?.clone()
+        };
+
+        let mut edge = Edge::new(id, record.src, record.dst, edge_type);
+
+        // Get properties
+        edge.properties = self.edge_properties.get_all(id).into_iter().collect();
+
+        Some(edge)
+    }
+
+    /// Deletes an edge (using latest epoch).
     pub fn delete_edge(&self, id: EdgeId) -> bool {
+        self.delete_edge_at_epoch(id, self.current_epoch())
+    }
+
+    /// Deletes an edge at a specific epoch.
+    pub fn delete_edge_at_epoch(&self, id: EdgeId, epoch: EpochId) -> bool {
         let mut edges = self.edges.write();
-        if let Some(record) = edges.get_mut(&id) {
-            if record.is_deleted() {
-                return false;
-            }
+        if let Some(chain) = edges.get_mut(&id) {
+            // Get the visible record to check if deleted and get src/dst
+            let (src, dst) = {
+                match chain.visible_at(epoch) {
+                    Some(record) => {
+                        if record.is_deleted() {
+                            return false;
+                        }
+                        (record.src, record.dst)
+                    }
+                    None => return false, // Not visible at this epoch (already deleted)
+                }
+            };
 
-            let src = record.src;
-            let dst = record.dst;
-
-            record.set_deleted(true);
+            // Mark the version chain as deleted
+            chain.mark_deleted(epoch);
 
             drop(edges); // Release lock
 
@@ -354,14 +706,67 @@ impl LpgStore {
         }
     }
 
-    /// Returns the number of edges.
+    /// Returns the number of edges (non-deleted at current epoch).
     #[must_use]
     pub fn edge_count(&self) -> usize {
+        let epoch = self.current_epoch();
         self.edges
             .read()
             .values()
+            .filter_map(|chain| chain.visible_at(epoch))
             .filter(|r| !r.is_deleted())
             .count()
+    }
+
+    /// Discards all uncommitted versions created by a transaction.
+    ///
+    /// This is called during transaction rollback to clean up uncommitted changes.
+    /// The method removes version chain entries created by the specified transaction.
+    pub fn discard_uncommitted_versions(&self, tx_id: TxId) {
+        // Remove uncommitted node versions
+        {
+            let mut nodes = self.nodes.write();
+            for chain in nodes.values_mut() {
+                chain.remove_versions_by(tx_id);
+            }
+            // Remove completely empty chains (no versions left)
+            nodes.retain(|_, chain| !chain.is_empty());
+        }
+
+        // Remove uncommitted edge versions
+        {
+            let mut edges = self.edges.write();
+            for chain in edges.values_mut() {
+                chain.remove_versions_by(tx_id);
+            }
+            // Remove completely empty chains (no versions left)
+            edges.retain(|_, chain| !chain.is_empty());
+        }
+    }
+
+    /// Returns the number of distinct labels in the store.
+    #[must_use]
+    pub fn label_count(&self) -> usize {
+        self.id_to_label.read().len()
+    }
+
+    /// Returns the number of distinct property keys in the store.
+    ///
+    /// This counts unique property keys across both nodes and edges.
+    #[must_use]
+    pub fn property_key_count(&self) -> usize {
+        let node_keys = self.node_properties.column_count();
+        let edge_keys = self.edge_properties.column_count();
+        // Note: This may count some keys twice if the same key is used
+        // for both nodes and edges. A more precise count would require
+        // tracking unique keys across both storages.
+        node_keys + edge_keys
+    }
+
+    /// Returns the number of distinct edge types in the store.
+    #[must_use]
+    pub fn edge_type_count(&self) -> usize {
+        self.id_to_edge_type.read().len()
     }
 
     // === Traversal ===
@@ -373,14 +778,16 @@ impl LpgStore {
         direction: Direction,
     ) -> impl Iterator<Item = NodeId> + '_ {
         let forward: Box<dyn Iterator<Item = NodeId>> = match direction {
-            Direction::Outgoing | Direction::Both => Box::new(self.forward_adj.neighbors(node)),
+            Direction::Outgoing | Direction::Both => {
+                Box::new(self.forward_adj.neighbors(node).into_iter())
+            }
             Direction::Incoming => Box::new(std::iter::empty()),
         };
 
         let backward: Box<dyn Iterator<Item = NodeId>> = match direction {
             Direction::Incoming | Direction::Both => {
                 if let Some(ref adj) = self.backward_adj {
-                    Box::new(adj.neighbors(node))
+                    Box::new(adj.neighbors(node).into_iter())
                 } else {
                     Box::new(std::iter::empty())
                 }
@@ -400,14 +807,16 @@ impl LpgStore {
         direction: Direction,
     ) -> impl Iterator<Item = (NodeId, EdgeId)> + '_ {
         let forward: Box<dyn Iterator<Item = (NodeId, EdgeId)>> = match direction {
-            Direction::Outgoing | Direction::Both => Box::new(self.forward_adj.edges_from(node)),
+            Direction::Outgoing | Direction::Both => {
+                Box::new(self.forward_adj.edges_from(node).into_iter())
+            }
             Direction::Incoming => Box::new(std::iter::empty()),
         };
 
         let backward: Box<dyn Iterator<Item = (NodeId, EdgeId)>> = match direction {
             Direction::Incoming | Direction::Both => {
                 if let Some(ref adj) = self.backward_adj {
-                    Box::new(adj.edges_from(node))
+                    Box::new(adj.edges_from(node).into_iter())
                 } else {
                     Box::new(std::iter::empty())
                 }
@@ -422,7 +831,9 @@ impl LpgStore {
     #[must_use]
     pub fn edge_type(&self, id: EdgeId) -> Option<Arc<str>> {
         let edges = self.edges.read();
-        let record = edges.get(&id)?;
+        let chain = edges.get(&id)?;
+        let epoch = self.current_epoch();
+        let record = chain.visible_at(epoch)?;
         let id_to_type = self.id_to_edge_type.read();
         id_to_type.get(record.type_id as usize).cloned()
     }
@@ -530,11 +941,14 @@ impl LpgStore {
         // Compute per-edge-type statistics
         let id_to_edge_type = self.id_to_edge_type.read();
         let edges = self.edges.read();
+        let epoch = self.current_epoch();
 
         let mut edge_type_counts: FxHashMap<u32, u64> = FxHashMap::default();
-        for record in edges.values() {
-            if !record.is_deleted() {
-                *edge_type_counts.entry(record.type_id).or_default() += 1;
+        for chain in edges.values() {
+            if let Some(record) = chain.visible_at(epoch) {
+                if !record.is_deleted() {
+                    *edge_type_counts.entry(record.type_id).or_default() += 1;
+                }
             }
         }
 
@@ -568,7 +982,7 @@ impl LpgStore {
 
     // === Internal Helpers ===
 
-    fn get_or_create_label_id(&self, label: &str) -> u8 {
+    fn get_or_create_label_id(&self, label: &str) -> u32 {
         {
             let label_to_id = self.label_to_id.read();
             if let Some(&id) = label_to_id.get(label) {
@@ -584,8 +998,7 @@ impl LpgStore {
             return id;
         }
 
-        let id = id_to_label.len() as u8;
-        assert!(id < 64, "Maximum 64 labels supported");
+        let id = id_to_label.len() as u32;
 
         let label: Arc<str> = label.into();
         label_to_id.insert(label.clone(), id);
@@ -616,6 +1029,92 @@ impl LpgStore {
         id_to_type.push(edge_type);
 
         id
+    }
+
+    // === Recovery Support ===
+
+    /// Creates a node with a specific ID during recovery.
+    ///
+    /// This is used for WAL recovery to restore nodes with their original IDs.
+    /// The caller must ensure IDs don't conflict with existing nodes.
+    pub fn create_node_with_id(&self, id: NodeId, labels: &[&str]) {
+        let epoch = self.current_epoch();
+        let mut record = NodeRecord::new(id, epoch);
+        record.set_label_count(labels.len() as u16);
+
+        // Store labels in node_labels map and label_index
+        let mut node_label_set = FxHashSet::default();
+        for label in labels {
+            let label_id = self.get_or_create_label_id(*label);
+            node_label_set.insert(label_id);
+
+            // Update label index
+            let mut index = self.label_index.write();
+            while index.len() <= label_id as usize {
+                index.push(FxHashMap::default());
+            }
+            index[label_id as usize].insert(id, ());
+        }
+
+        // Store node's labels
+        self.node_labels.write().insert(id, node_label_set);
+
+        // Create version chain with initial version (using SYSTEM tx for recovery)
+        let chain = VersionChain::with_initial(record, epoch, TxId::SYSTEM);
+        self.nodes.write().insert(id, chain);
+
+        // Update next_node_id if necessary to avoid future collisions
+        let id_val = id.as_u64();
+        let _ = self
+            .next_node_id
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                if id_val >= current {
+                    Some(id_val + 1)
+                } else {
+                    None
+                }
+            });
+    }
+
+    /// Creates an edge with a specific ID during recovery.
+    ///
+    /// This is used for WAL recovery to restore edges with their original IDs.
+    pub fn create_edge_with_id(
+        &self,
+        id: EdgeId,
+        src: NodeId,
+        dst: NodeId,
+        edge_type: &str,
+    ) {
+        let epoch = self.current_epoch();
+        let type_id = self.get_or_create_edge_type_id(edge_type);
+
+        let record = EdgeRecord::new(id, src, dst, type_id, epoch);
+        let chain = VersionChain::with_initial(record, epoch, TxId::SYSTEM);
+        self.edges.write().insert(id, chain);
+
+        // Update adjacency
+        self.forward_adj.add_edge(src, dst, id);
+        if let Some(ref backward) = self.backward_adj {
+            backward.add_edge(dst, src, id);
+        }
+
+        // Update next_edge_id if necessary
+        let id_val = id.as_u64();
+        let _ = self
+            .next_edge_id
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                if id_val >= current {
+                    Some(id_val + 1)
+                } else {
+                    None
+                }
+            });
+    }
+
+    /// Sets the current epoch during recovery.
+    pub fn set_epoch(&self, epoch: EpochId) {
+        self.current_epoch.store(epoch.as_u64(), Ordering::SeqCst);
     }
 }
 

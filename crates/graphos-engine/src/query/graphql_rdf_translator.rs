@@ -15,7 +15,6 @@ use crate::query::plan::{
     Projection, ProjectOp, TripleComponent, TripleScanOp,
 };
 use graphos_adapters::query::graphql::{self, ast};
-use graphos_common::types::Value;
 use graphos_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};

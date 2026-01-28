@@ -11,6 +11,8 @@ use graphos_common::utils::error::{Error, Result};
 pub struct Parser<'a> {
     tokens: Vec<Token>,
     position: usize,
+    /// Source string for error reporting.
+    #[allow(dead_code)]
     source: &'a str,
 }
 

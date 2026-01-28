@@ -296,6 +296,10 @@ impl Default for CostModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::query::plan::{
+        AggregateExpr, AggregateFunction, ExpandDirection, JoinCondition, LogicalExpression,
+        Projection, ReturnItem, SortOrder,
+    };
 
     #[test]
     fn test_cost_addition() {
@@ -342,5 +346,311 @@ mod tests {
 
         // Sorting 1000 rows should be more expensive than 100 rows
         assert!(cost_1000.total() > cost_100.total());
+    }
+
+    #[test]
+    fn test_cost_zero() {
+        let cost = Cost::zero();
+        assert!((cost.cpu).abs() < 0.001);
+        assert!((cost.io).abs() < 0.001);
+        assert!((cost.memory).abs() < 0.001);
+        assert!((cost.network).abs() < 0.001);
+        assert!((cost.total()).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_cost_add_assign() {
+        let mut cost = Cost::cpu(10.0);
+        cost += Cost::cpu(5.0).with_io(2.0);
+        assert!((cost.cpu - 15.0).abs() < 0.001);
+        assert!((cost.io - 2.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_cost_total_weighted() {
+        let cost = Cost::cpu(10.0).with_io(2.0).with_memory(100.0);
+        // With custom weights: cpu*2 + io*5 + mem*0.5 = 20 + 10 + 50 = 80
+        let total = cost.total_weighted(2.0, 5.0, 0.5);
+        assert!((total - 80.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_cost_model_filter() {
+        let model = CostModel::new();
+        let filter = FilterOp {
+            predicate: LogicalExpression::Literal(graphos_common::types::Value::Bool(true)),
+            input: Box::new(LogicalOperator::Empty),
+        };
+        let cost = model.filter_cost(&filter, 1000.0);
+
+        // Filter cost is CPU only
+        assert!(cost.cpu > 0.0);
+        assert!((cost.io).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_cost_model_project() {
+        let model = CostModel::new();
+        let project = ProjectOp {
+            projections: vec![
+                Projection {
+                    expression: LogicalExpression::Variable("a".to_string()),
+                    alias: None,
+                },
+                Projection {
+                    expression: LogicalExpression::Variable("b".to_string()),
+                    alias: None,
+                },
+            ],
+            input: Box::new(LogicalOperator::Empty),
+        };
+        let cost = model.project_cost(&project, 1000.0);
+
+        // Cost should scale with number of projections
+        assert!(cost.cpu > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_expand() {
+        let model = CostModel::new();
+        let expand = ExpandOp {
+            from_variable: "a".to_string(),
+            to_variable: "b".to_string(),
+            edge_variable: None,
+            direction: ExpandDirection::Outgoing,
+            edge_type: None,
+            min_hops: 1,
+            max_hops: Some(1),
+            input: Box::new(LogicalOperator::Empty),
+        };
+        let cost = model.expand_cost(&expand, 1000.0);
+
+        // Expand involves hash lookups and output generation
+        assert!(cost.cpu > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_hash_join() {
+        let model = CostModel::new();
+        let join = JoinOp {
+            left: Box::new(LogicalOperator::Empty),
+            right: Box::new(LogicalOperator::Empty),
+            join_type: JoinType::Inner,
+            conditions: vec![JoinCondition {
+                left: LogicalExpression::Variable("a".to_string()),
+                right: LogicalExpression::Variable("b".to_string()),
+            }],
+        };
+        let cost = model.join_cost(&join, 10000.0);
+
+        // Hash join has CPU cost and memory cost
+        assert!(cost.cpu > 0.0);
+        assert!(cost.memory > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_cross_join() {
+        let model = CostModel::new();
+        let join = JoinOp {
+            left: Box::new(LogicalOperator::Empty),
+            right: Box::new(LogicalOperator::Empty),
+            join_type: JoinType::Cross,
+            conditions: vec![],
+        };
+        let cost = model.join_cost(&join, 1000000.0);
+
+        // Cross join is expensive
+        assert!(cost.cpu > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_semi_join() {
+        let model = CostModel::new();
+        let join = JoinOp {
+            left: Box::new(LogicalOperator::Empty),
+            right: Box::new(LogicalOperator::Empty),
+            join_type: JoinType::Semi,
+            conditions: vec![],
+        };
+        let cost_semi = model.join_cost(&join, 1000.0);
+
+        let inner_join = JoinOp {
+            left: Box::new(LogicalOperator::Empty),
+            right: Box::new(LogicalOperator::Empty),
+            join_type: JoinType::Inner,
+            conditions: vec![],
+        };
+        let cost_inner = model.join_cost(&inner_join, 1000.0);
+
+        // Semi join can be cheaper than inner join
+        assert!(cost_semi.cpu > 0.0);
+        assert!(cost_inner.cpu > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_aggregate() {
+        let model = CostModel::new();
+        let agg = AggregateOp {
+            group_by: vec![],
+            aggregates: vec![
+                AggregateExpr {
+                    function: AggregateFunction::Count,
+                    expression: None,
+                    distinct: false,
+                    alias: Some("cnt".to_string()),
+                },
+                AggregateExpr {
+                    function: AggregateFunction::Sum,
+                    expression: Some(LogicalExpression::Variable("x".to_string())),
+                    distinct: false,
+                    alias: Some("total".to_string()),
+                },
+            ],
+            input: Box::new(LogicalOperator::Empty),
+        };
+        let cost = model.aggregate_cost(&agg, 1000.0);
+
+        // Aggregation has hash cost and memory cost
+        assert!(cost.cpu > 0.0);
+        assert!(cost.memory > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_distinct() {
+        let model = CostModel::new();
+        let distinct = DistinctOp {
+            input: Box::new(LogicalOperator::Empty),
+        };
+        let cost = model.distinct_cost(&distinct, 1000.0);
+
+        // Distinct uses hash set
+        assert!(cost.cpu > 0.0);
+        assert!(cost.memory > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_limit() {
+        let model = CostModel::new();
+        let limit = LimitOp {
+            count: 10,
+            input: Box::new(LogicalOperator::Empty),
+        };
+        let cost = model.limit_cost(&limit, 1000.0);
+
+        // Limit is very cheap
+        assert!(cost.cpu > 0.0);
+        assert!(cost.cpu < 1.0); // Should be minimal
+    }
+
+    #[test]
+    fn test_cost_model_skip() {
+        let model = CostModel::new();
+        let skip = SkipOp {
+            count: 100,
+            input: Box::new(LogicalOperator::Empty),
+        };
+        let cost = model.skip_cost(&skip, 1000.0);
+
+        // Skip must scan through skipped rows
+        assert!(cost.cpu > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_return() {
+        let model = CostModel::new();
+        let ret = ReturnOp {
+            items: vec![
+                ReturnItem {
+                    expression: LogicalExpression::Variable("a".to_string()),
+                    alias: None,
+                },
+                ReturnItem {
+                    expression: LogicalExpression::Variable("b".to_string()),
+                    alias: None,
+                },
+            ],
+            distinct: false,
+            input: Box::new(LogicalOperator::Empty),
+        };
+        let cost = model.return_cost(&ret, 1000.0);
+
+        // Return materializes results
+        assert!(cost.cpu > 0.0);
+    }
+
+    #[test]
+    fn test_cost_cheaper() {
+        let model = CostModel::new();
+        let cheap = Cost::cpu(10.0);
+        let expensive = Cost::cpu(100.0);
+
+        assert_eq!(model.cheaper(&cheap, &expensive).total(), cheap.total());
+        assert_eq!(model.cheaper(&expensive, &cheap).total(), cheap.total());
+    }
+
+    #[test]
+    fn test_cost_comparison_prefers_lower_total() {
+        let model = CostModel::new();
+        // High CPU, low IO
+        let cpu_heavy = Cost::cpu(100.0).with_io(1.0);
+        // Low CPU, high IO
+        let io_heavy = Cost::cpu(10.0).with_io(20.0);
+
+        // IO is weighted 10x, so io_heavy = 10 + 200 = 210, cpu_heavy = 100 + 10 = 110
+        assert!(cpu_heavy.total() < io_heavy.total());
+        assert_eq!(
+            model.cheaper(&cpu_heavy, &io_heavy).total(),
+            cpu_heavy.total()
+        );
+    }
+
+    #[test]
+    fn test_cost_model_sort_with_keys() {
+        let model = CostModel::new();
+        let sort_single = SortOp {
+            keys: vec![crate::query::plan::SortKey {
+                expression: LogicalExpression::Variable("a".to_string()),
+                order: SortOrder::Ascending,
+            }],
+            input: Box::new(LogicalOperator::Empty),
+        };
+        let sort_multi = SortOp {
+            keys: vec![
+                crate::query::plan::SortKey {
+                    expression: LogicalExpression::Variable("a".to_string()),
+                    order: SortOrder::Ascending,
+                },
+                crate::query::plan::SortKey {
+                    expression: LogicalExpression::Variable("b".to_string()),
+                    order: SortOrder::Descending,
+                },
+            ],
+            input: Box::new(LogicalOperator::Empty),
+        };
+
+        let cost_single = model.sort_cost(&sort_single, 1000.0);
+        let cost_multi = model.sort_cost(&sort_multi, 1000.0);
+
+        // More sort keys = more comparisons
+        assert!(cost_multi.cpu > cost_single.cpu);
+    }
+
+    #[test]
+    fn test_cost_model_empty_operator() {
+        let model = CostModel::new();
+        let cost = model.estimate(&LogicalOperator::Empty, 0.0);
+        assert!((cost.total()).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_cost_model_default() {
+        let model = CostModel::default();
+        let scan = NodeScanOp {
+            variable: "n".to_string(),
+            label: None,
+            input: None,
+        };
+        let cost = model.estimate(&LogicalOperator::NodeScan(scan), 100.0);
+        assert!(cost.total() > 0.0);
     }
 }

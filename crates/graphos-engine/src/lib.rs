@@ -23,6 +23,7 @@ pub mod query;
 pub mod session;
 pub mod transaction;
 
+pub use catalog::{Catalog, CatalogError, IndexDefinition, IndexType};
 pub use config::Config;
 pub use database::GraphosDB;
 pub use session::Session;

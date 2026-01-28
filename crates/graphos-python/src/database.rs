@@ -1,20 +1,102 @@
 //! Python database interface.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use pyo3::prelude::*;
+use pyo3_async_runtimes::tokio::future_into_py;
 
-use graphos_common::types::{EdgeId, NodeId};
+use graphos_common::types::{EdgeId, LogicalType, NodeId, Value};
 use graphos_engine::config::Config;
-use graphos_engine::database::GraphosDB;
+use graphos_engine::database::{GraphosDB, QueryResult};
 
 use crate::bridges::{PyAlgorithms, PyNetworkXAdapter, PySolvORAdapter};
 use crate::error::PyGraphosError;
 use crate::graph::{PyEdge, PyNode};
 use crate::query::{PyQueryBuilder, PyQueryResult};
 use crate::types::PyValue;
+
+/// Result from async query execution.
+///
+/// This is a simpler result type used for async queries since we can't
+/// safely extract nodes/edges from a non-Python context.
+#[pyclass(name = "AsyncQueryResult")]
+pub struct AsyncQueryResult {
+    #[pyo3(get)]
+    columns: Vec<String>,
+    rows: Vec<Vec<Value>>,
+    #[allow(dead_code)]
+    column_types: Vec<LogicalType>,
+}
+
+#[pymethods]
+impl AsyncQueryResult {
+    /// Get all rows as a list of lists.
+    fn rows(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let list = pyo3::types::PyList::empty(py);
+        for row in &self.rows {
+            let py_row = pyo3::types::PyList::empty(py);
+            for val in row {
+                let py_val = PyValue::to_py(val, py);
+                py_row.append(py_val)?;
+            }
+            list.append(py_row)?;
+        }
+        Ok(list.into())
+    }
+
+    /// Get the number of rows.
+    fn __len__(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Iterate over rows.
+    fn __iter__(slf: PyRef<'_, Self>) -> AsyncQueryResultIter {
+        AsyncQueryResultIter {
+            rows: slf.rows.clone(),
+            index: 0,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "AsyncQueryResult(columns={:?}, rows={})",
+            self.columns,
+            self.rows.len()
+        )
+    }
+}
+
+/// Iterator for async query results.
+#[pyclass]
+pub struct AsyncQueryResultIter {
+    rows: Vec<Vec<Value>>,
+    index: usize,
+}
+
+#[pymethods]
+impl AsyncQueryResultIter {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> Option<Py<PyAny>> {
+        if slf.index >= slf.rows.len() {
+            return None;
+        }
+        let row = slf.rows[slf.index].clone();
+        slf.index += 1;
+
+        let py_row = pyo3::types::PyList::empty(py);
+        for val in &row {
+            let py_val = PyValue::to_py(val, py);
+            let _ = py_row.append(py_val);
+        }
+        Some(py_row.into())
+    }
+}
 
 /// Python wrapper for GraphosDB.
 #[pyclass(name = "GraphosDB")]
@@ -34,7 +116,7 @@ impl PyGraphosDB {
             Config::in_memory()
         };
 
-        let db = GraphosDB::with_config(config);
+        let db = GraphosDB::with_config(config).map_err(PyGraphosError::from)?;
 
         Ok(Self {
             inner: Arc::new(RwLock::new(db)),
@@ -45,7 +127,7 @@ impl PyGraphosDB {
     #[staticmethod]
     fn open(path: String) -> PyResult<Self> {
         let config = Config::persistent(path);
-        let db = GraphosDB::with_config(config);
+        let db = GraphosDB::with_config(config).map_err(PyGraphosError::from)?;
 
         Ok(Self {
             inner: Arc::new(RwLock::new(db)),
@@ -60,35 +142,97 @@ impl PyGraphosDB {
         params: Option<&Bound<'_, pyo3::types::PyDict>>,
         _py: Python<'_>,
     ) -> PyResult<PyQueryResult> {
-        let _params = if let Some(p) = params {
-            let mut map = HashMap::new();
+        let db = self.inner.read();
+
+        let result = if let Some(p) = params {
+            // Convert Python params to Rust HashMap
+            let mut param_map = HashMap::new();
             for (key, value) in p.iter() {
                 let key_str: String = key.extract()?;
                 let val = PyValue::from_py(&value).map_err(PyGraphosError::from)?;
-                map.insert(key_str, val);
+                param_map.insert(key_str, val);
             }
-            map
+            db.execute_with_params(query, param_map).map_err(PyGraphosError::from)?
         } else {
-            HashMap::new()
+            db.execute(query).map_err(PyGraphosError::from)?
         };
 
-        // Execute the query using the database engine
-        let db = self.inner.read();
-        let result = db.execute(query).map_err(PyGraphosError::from)?;
+        // Extract nodes and edges based on column types
+        let (nodes, edges) = extract_entities(&result, &db);
 
-        // Convert the result to Python-friendly format
-        // FIXME(python-result-extraction): Extract nodes and edges from query result
         Ok(PyQueryResult::new(
             result.columns,
             result.rows,
-            Vec::new(), // Nodes not yet extracted
-            Vec::new(), // Edges not yet extracted
+            nodes,
+            edges,
         ))
     }
 
     /// Execute a query and return a query builder.
     fn query(&self, query: String) -> PyQueryBuilder {
         PyQueryBuilder::create(query)
+    }
+
+    /// Execute a GQL query asynchronously.
+    ///
+    /// This method returns a Python awaitable that can be used with asyncio.
+    ///
+    /// Example:
+    /// ```python
+    /// async def main():
+    ///     db = GraphosDB()
+    ///     result = await db.execute_async("MATCH (n:Person) RETURN n")
+    ///     for row in result:
+    ///         print(row)
+    ///
+    /// asyncio.run(main())
+    /// ```
+    #[pyo3(signature = (query, params=None))]
+    fn execute_async<'py>(
+        &self,
+        py: Python<'py>,
+        query: String,
+        params: Option<&Bound<'py, pyo3::types::PyDict>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        // Convert params before the async block since they contain Python references
+        let param_map: Option<HashMap<String, Value>> = if let Some(p) = params {
+            let mut map = HashMap::new();
+            for (key, value) in p.iter() {
+                let key_str: String = key.extract()?;
+                let val = PyValue::from_py(&value).map_err(PyGraphosError::from)?;
+                map.insert(key_str, val);
+            }
+            Some(map)
+        } else {
+            None
+        };
+
+        let db = self.inner.clone();
+
+        future_into_py(py, async move {
+            // Perform the query execution in the async context
+            // We use spawn_blocking since the actual db.execute is synchronous
+            let result = tokio::task::spawn_blocking(move || {
+                let db = db.read();
+                if let Some(params) = param_map {
+                    db.execute_with_params(&query, params)
+                } else {
+                    db.execute(&query)
+                }
+            })
+            .await
+            .map_err(|e| PyGraphosError::Database(e.to_string()))?
+            .map_err(PyGraphosError::from)?;
+
+            // Create PyQueryResult from the result
+            // Note: We can't call extract_entities here because we don't have
+            // Python references in the async context. We return raw data.
+            Ok(AsyncQueryResult {
+                columns: result.columns,
+                rows: result.rows,
+                column_types: result.column_types,
+            })
+        })
     }
 
     /// Execute a Gremlin query.
@@ -100,26 +244,29 @@ impl PyGraphosDB {
         params: Option<&Bound<'_, pyo3::types::PyDict>>,
         _py: Python<'_>,
     ) -> PyResult<PyQueryResult> {
-        let _params = if let Some(p) = params {
-            let mut map = HashMap::new();
+        let db = self.inner.read();
+
+        let result = if let Some(p) = params {
+            // Convert Python params to Rust HashMap
+            let mut param_map = HashMap::new();
             for (key, value) in p.iter() {
                 let key_str: String = key.extract()?;
                 let val = PyValue::from_py(&value).map_err(PyGraphosError::from)?;
-                map.insert(key_str, val);
+                param_map.insert(key_str, val);
             }
-            map
+            db.execute_gremlin_with_params(query, param_map).map_err(PyGraphosError::from)?
         } else {
-            HashMap::new()
+            db.execute_gremlin(query).map_err(PyGraphosError::from)?
         };
 
-        let db = self.inner.read();
-        let result = db.execute_gremlin(query).map_err(PyGraphosError::from)?;
+        // Extract nodes and edges based on column types
+        let (nodes, edges) = extract_entities(&result, &db);
 
         Ok(PyQueryResult::new(
             result.columns,
             result.rows,
-            Vec::new(),
-            Vec::new(),
+            nodes,
+            edges,
         ))
     }
 
@@ -132,6 +279,46 @@ impl PyGraphosDB {
         params: Option<&Bound<'_, pyo3::types::PyDict>>,
         _py: Python<'_>,
     ) -> PyResult<PyQueryResult> {
+        let db = self.inner.read();
+
+        let result = if let Some(p) = params {
+            // Convert Python params to Rust HashMap
+            let mut param_map = HashMap::new();
+            for (key, value) in p.iter() {
+                let key_str: String = key.extract()?;
+                let val = PyValue::from_py(&value).map_err(PyGraphosError::from)?;
+                param_map.insert(key_str, val);
+            }
+            db.execute_graphql_with_params(query, param_map).map_err(PyGraphosError::from)?
+        } else {
+            db.execute_graphql(query).map_err(PyGraphosError::from)?
+        };
+
+        // Extract nodes and edges based on column types
+        let (nodes, edges) = extract_entities(&result, &db);
+
+        Ok(PyQueryResult::new(
+            result.columns,
+            result.rows,
+            nodes,
+            edges,
+        ))
+    }
+
+    /// Execute a SPARQL query against the RDF triple store.
+    ///
+    /// SPARQL is the W3C standard query language for RDF data.
+    ///
+    /// Example:
+    ///     result = db.execute_sparql("SELECT ?s ?p ?o WHERE { ?s ?p ?o }")
+    #[cfg(feature = "sparql")]
+    #[pyo3(signature = (query, params=None))]
+    fn execute_sparql(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+        _py: Python<'_>,
+    ) -> PyResult<PyQueryResult> {
         let _params = if let Some(p) = params {
             let mut map = HashMap::new();
             for (key, value) in p.iter() {
@@ -145,8 +332,9 @@ impl PyGraphosDB {
         };
 
         let db = self.inner.read();
-        let result = db.execute_graphql(query).map_err(PyGraphosError::from)?;
+        let result = db.execute_sparql(query).map_err(PyGraphosError::from)?;
 
+        // SPARQL results don't have LPG nodes/edges, so pass empty vectors
         Ok(PyQueryResult::new(
             result.columns,
             result.rows,
@@ -300,32 +488,104 @@ impl PyGraphosDB {
         Ok(db.delete_edge(EdgeId(id)))
     }
 
+    /// Set a property on a node.
+    ///
+    /// Example:
+    /// ```python
+    /// db.set_node_property(node_id, "name", "Alice")
+    /// db.set_node_property(node_id, "age", 30)
+    /// ```
+    fn set_node_property(
+        &self,
+        node_id: u64,
+        key: &str,
+        value: &Bound<'_, pyo3::prelude::PyAny>,
+    ) -> PyResult<()> {
+        let db = self.inner.read();
+        let val = PyValue::from_py(value).map_err(PyGraphosError::from)?;
+        db.set_node_property(NodeId(node_id), key, val);
+        Ok(())
+    }
+
+    /// Set a property on an edge.
+    ///
+    /// Example:
+    /// ```python
+    /// db.set_edge_property(edge_id, "weight", 1.5)
+    /// db.set_edge_property(edge_id, "since", "2024-01-01")
+    /// ```
+    fn set_edge_property(
+        &self,
+        edge_id: u64,
+        key: &str,
+        value: &Bound<'_, pyo3::prelude::PyAny>,
+    ) -> PyResult<()> {
+        let db = self.inner.read();
+        let val = PyValue::from_py(value).map_err(PyGraphosError::from)?;
+        db.set_edge_property(EdgeId(edge_id), key, val);
+        Ok(())
+    }
+
+    /// Remove a property from a node.
+    ///
+    /// Returns True if the property existed and was removed, False otherwise.
+    ///
+    /// Example:
+    /// ```python
+    /// if db.remove_node_property(node_id, "deprecated_field"):
+    ///     print("Property removed")
+    /// ```
+    fn remove_node_property(&self, node_id: u64, key: &str) -> PyResult<bool> {
+        let db = self.inner.read();
+        Ok(db.remove_node_property(NodeId(node_id), key))
+    }
+
+    /// Remove a property from an edge.
+    ///
+    /// Returns True if the property existed and was removed, False otherwise.
+    ///
+    /// Example:
+    /// ```python
+    /// if db.remove_edge_property(edge_id, "temporary"):
+    ///     print("Property removed")
+    /// ```
+    fn remove_edge_property(&self, edge_id: u64, key: &str) -> PyResult<bool> {
+        let db = self.inner.read();
+        Ok(db.remove_edge_property(EdgeId(edge_id), key))
+    }
+
     /// Begin a transaction.
     ///
     /// Returns a Transaction object that can be used as a context manager.
+    /// The transaction provides snapshot isolation - all queries within the
+    /// transaction see a consistent view of the database.
+    ///
+    /// Example:
+    /// ```python
+    /// with db.begin_transaction() as tx:
+    ///     tx.execute("CREATE (n:Person {name: 'Alice'})")
+    ///     tx.execute("CREATE (n:Person {name: 'Bob'})")
+    ///     tx.commit()  # Both nodes created atomically
+    /// ```
     fn begin_transaction(&self) -> PyResult<PyTransaction> {
-        Ok(PyTransaction {
-            db: self.inner.clone(),
-            committed: false,
-            rolled_back: false,
-        })
+        PyTransaction::new(self.inner.clone())
     }
 
     /// Get database statistics.
     fn stats(&self) -> PyResult<PyDbStats> {
         let db = self.inner.read();
-        // FIXME(db-stats): Add label_count and property_count to GraphosDB API
         Ok(PyDbStats {
             node_count: db.node_count() as u64,
             edge_count: db.edge_count() as u64,
-            label_count: 0,    // Not yet implemented in GraphosDB
-            property_count: 0, // Not yet implemented in GraphosDB
+            label_count: db.label_count() as u64,
+            property_count: db.property_key_count() as u64,
         })
     }
 
     /// Close the database.
     fn close(&self) -> PyResult<()> {
-        // FIXME(db-close): Implement proper database close with WAL flush
+        let db = self.inner.read();
+        db.close().map_err(PyGraphosError::from)?;
         Ok(())
     }
 
@@ -410,45 +670,85 @@ impl PyGraphosDB {
 /// Use this as a context manager for transactional operations:
 /// ```python
 /// with db.begin_transaction() as tx:
-///     db.create_node(["Person"], {"name": "Alice"})
+///     tx.execute("CREATE (n:Person {name: 'Alice'})")
 ///     tx.commit()
 /// ```
+///
+/// Changes are isolated until commit and automatically rolled back on exception.
 #[pyclass(name = "Transaction")]
 pub struct PyTransaction {
     db: Arc<RwLock<GraphosDB>>,
+    session: parking_lot::Mutex<Option<graphos_engine::session::Session>>,
     committed: bool,
     rolled_back: bool,
+}
+
+impl PyTransaction {
+    /// Create a new transaction, starting a Rust transaction internally.
+    fn new(db: Arc<RwLock<GraphosDB>>) -> PyResult<Self> {
+        // Create session from db, but drop the read guard before moving db
+        let mut session = {
+            let db_guard = db.read();
+            db_guard.session()
+        };
+
+        // Begin the transaction in the Rust session
+        session.begin_tx().map_err(PyGraphosError::from)?;
+
+        Ok(Self {
+            db,
+            session: parking_lot::Mutex::new(Some(session)),
+            committed: false,
+            rolled_back: false,
+        })
+    }
 }
 
 #[pymethods]
 impl PyTransaction {
     /// Commit the transaction.
+    ///
+    /// Makes all changes permanent. Raises an error if the transaction is
+    /// already completed or if there's a write-write conflict.
     fn commit(&mut self) -> PyResult<()> {
         if self.committed || self.rolled_back {
             return Err(pyo3::exceptions::PyRuntimeError::new_err(
                 "Transaction already completed",
             ));
         }
-        // For now, since GraphosDB auto-commits operations, we just mark as committed
-        // A full implementation would track changes and apply them here
+
+        let mut session_guard = self.session.lock();
+        if let Some(ref mut session) = *session_guard {
+            session.commit().map_err(PyGraphosError::from)?;
+        }
+        *session_guard = None; // Drop the session
         self.committed = true;
         Ok(())
     }
 
     /// Rollback the transaction.
+    ///
+    /// Discards all changes made within this transaction.
     fn rollback(&mut self) -> PyResult<()> {
         if self.committed || self.rolled_back {
             return Err(pyo3::exceptions::PyRuntimeError::new_err(
                 "Transaction already completed",
             ));
         }
-        // For now, mark as rolled back
-        // A full implementation would discard uncommitted changes
+
+        let mut session_guard = self.session.lock();
+        if let Some(ref mut session) = *session_guard {
+            session.rollback().map_err(PyGraphosError::from)?;
+        }
+        *session_guard = None; // Drop the session
         self.rolled_back = true;
         Ok(())
     }
 
     /// Execute a query within this transaction.
+    ///
+    /// All queries executed through this method see the same snapshot
+    /// and their changes are isolated until commit.
     #[pyo3(signature = (query, params=None))]
     fn execute(
         &self,
@@ -462,26 +762,35 @@ impl PyTransaction {
             ));
         }
 
-        let _params = if let Some(p) = params {
-            let mut map = HashMap::new();
+        let db = self.db.read();
+        let mut session_guard = self.session.lock();
+        let session = session_guard.as_mut().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("Transaction session not available")
+        })?;
+
+        let result = if let Some(p) = params {
+            // Convert Python params to Rust HashMap
+            let mut param_map = HashMap::new();
             for (key, value) in p.iter() {
                 let key_str: String = key.extract()?;
                 let val = PyValue::from_py(&value).map_err(PyGraphosError::from)?;
-                map.insert(key_str, val);
+                param_map.insert(key_str, val);
             }
-            map
+            session
+                .execute_with_params(query, param_map)
+                .map_err(PyGraphosError::from)?
         } else {
-            HashMap::new()
+            session.execute(query).map_err(PyGraphosError::from)?
         };
 
-        let db = self.db.read();
-        let result = db.execute(query).map_err(PyGraphosError::from)?;
+        // Extract nodes and edges based on column types
+        let (nodes, edges) = extract_entities(&result, &db);
 
         Ok(PyQueryResult::new(
             result.columns,
             result.rows,
-            Vec::new(),
-            Vec::new(),
+            nodes,
+            edges,
         ))
     }
 
@@ -505,6 +814,7 @@ impl PyTransaction {
             if exc_type.is_some() {
                 self.rollback()?;
             } else {
+                // Auto-commit on successful exit (no exception)
                 self.commit()?;
             }
         }
@@ -544,4 +854,75 @@ impl PyDbStats {
             self.node_count, self.edge_count, self.label_count, self.property_count
         )
     }
+}
+
+/// Extracts nodes and edges from a query result based on column types.
+fn extract_entities(result: &QueryResult, db: &GraphosDB) -> (Vec<PyNode>, Vec<PyEdge>) {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let mut seen_node_ids = HashSet::new();
+    let mut seen_edge_ids = HashSet::new();
+
+    // Find which columns contain Node/Edge types
+    let node_cols: Vec<usize> = result
+        .column_types
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| if *t == LogicalType::Node { Some(i) } else { None })
+        .collect();
+
+    let edge_cols: Vec<usize> = result
+        .column_types
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| if *t == LogicalType::Edge { Some(i) } else { None })
+        .collect();
+
+    // Extract unique nodes and edges from result rows
+    for row in &result.rows {
+        // Extract nodes
+        for &col_idx in &node_cols {
+            if let Some(Value::Int64(id)) = row.get(col_idx) {
+                let node_id = NodeId(*id as u64);
+                if !seen_node_ids.contains(&node_id) {
+                    seen_node_ids.insert(node_id);
+                    if let Some(node) = db.get_node(node_id) {
+                        let labels: Vec<String> = node.labels.iter().map(|s| s.to_string()).collect();
+                        let properties: HashMap<String, Value> = node
+                            .properties
+                            .into_iter()
+                            .map(|(k, v)| (k.as_str().to_string(), v))
+                            .collect();
+                        nodes.push(PyNode::new(node_id, labels, properties));
+                    }
+                }
+            }
+        }
+
+        // Extract edges
+        for &col_idx in &edge_cols {
+            if let Some(Value::Int64(id)) = row.get(col_idx) {
+                let edge_id = EdgeId(*id as u64);
+                if !seen_edge_ids.contains(&edge_id) {
+                    seen_edge_ids.insert(edge_id);
+                    if let Some(edge) = db.get_edge(edge_id) {
+                        let properties: HashMap<String, Value> = edge
+                            .properties
+                            .into_iter()
+                            .map(|(k, v)| (k.as_str().to_string(), v))
+                            .collect();
+                        edges.push(PyEdge::new(
+                            edge_id,
+                            edge.edge_type.to_string(),
+                            edge.src,
+                            edge.dst,
+                            properties,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    (nodes, edges)
 }

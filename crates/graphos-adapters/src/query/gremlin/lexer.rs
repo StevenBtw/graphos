@@ -151,6 +151,8 @@ pub struct Span {
 
 /// Gremlin lexer.
 pub struct Lexer<'a> {
+    /// Source string for error reporting.
+    #[allow(dead_code)]
     source: &'a str,
     chars: Peekable<Chars<'a>>,
     position: usize,

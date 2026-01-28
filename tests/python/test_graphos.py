@@ -270,11 +270,12 @@ class TestTransactions:
     """Test transaction functionality."""
 
     def test_transaction_commit(self):
-        """Test transaction commit."""
+        """Test transaction commit using tx.execute()."""
         db = GraphosDB()
 
         with db.begin_transaction() as tx:
-            db.create_node(["Person"], {"name": "TransactionTest"})
+            # Use tx.execute() for proper transactional semantics
+            tx.execute("INSERT (:Person {name: 'TransactionTest'})")
             tx.commit()
 
         # Data should be visible after commit
@@ -286,13 +287,32 @@ class TestTransactions:
         """Test that transactions auto-commit on success."""
         db = GraphosDB()
 
-        with db.begin_transaction():
-            db.create_node(["Person"], {"name": "AutoCommitTest"})
+        with db.begin_transaction() as tx:
+            # Use tx.execute() for proper transactional semantics
+            tx.execute("INSERT (:Person {name: 'AutoCommitTest'})")
 
         # Data should be visible after auto-commit
         result = db.execute("MATCH (n:Person) WHERE n.name = 'AutoCommitTest' RETURN n")
         rows = list(result)
         assert len(rows) == 1
+
+    def test_transaction_rollback(self):
+        """Test that transaction rollback discards changes."""
+        db = GraphosDB()
+
+        # First, verify database is empty
+        result = db.execute("MATCH (n:Person) RETURN n")
+        assert len(list(result)) == 0
+
+        # Create a node in a transaction and rollback
+        with db.begin_transaction() as tx:
+            tx.execute("INSERT (:Person {name: 'RollbackTest'})")
+            tx.rollback()
+
+        # Data should NOT be visible after rollback
+        result = db.execute("MATCH (n:Person) WHERE n.name = 'RollbackTest' RETURN n")
+        rows = list(result)
+        assert len(rows) == 0, f"Expected 0 rows after rollback, got {len(rows)}"
 
     def test_transaction_is_active(self):
         """Test transaction is_active property."""
@@ -303,6 +323,25 @@ class TestTransactions:
 
         tx.commit()
         assert tx.is_active is False
+
+    def test_db_create_bypasses_transaction(self):
+        """Test that db.create_node() bypasses transactions (by design).
+
+        This is expected behavior - db.create_node() is a low-level API
+        that operates outside transaction scope. For transactional
+        mutations, use tx.execute() with INSERT/CREATE queries.
+        """
+        db = GraphosDB()
+
+        with db.begin_transaction() as tx:
+            # db.create_node() bypasses the transaction - commits immediately
+            db.create_node(["Person"], {"name": "BypassTest"})
+            tx.rollback()  # This won't affect the node created via db.create_node()
+
+        # Node should still be visible because db.create_node() bypasses transaction
+        result = db.execute("MATCH (n:Person) WHERE n.name = 'BypassTest' RETURN n")
+        rows = list(result)
+        assert len(rows) == 1, "db.create_node() should bypass transaction and commit immediately"
 
 
 class TestEdgeCases:

@@ -801,4 +801,469 @@ mod tests {
         // but we can verify the plan was created successfully
         assert!(plan.cost.total() > 0.0);
     }
+
+    // Additional BitSet tests
+
+    #[test]
+    fn test_bitset_empty() {
+        let empty = BitSet::empty();
+        assert!(empty.is_empty());
+        assert_eq!(empty.len(), 0);
+        assert!(!empty.contains(0));
+    }
+
+    #[test]
+    fn test_bitset_insert_remove() {
+        let mut set = BitSet::empty();
+        set.insert(3);
+        assert!(set.contains(3));
+        assert_eq!(set.len(), 1);
+
+        set.insert(5);
+        assert!(set.contains(5));
+        assert_eq!(set.len(), 2);
+
+        set.remove(3);
+        assert!(!set.contains(3));
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn test_bitset_intersection() {
+        let a = BitSet::from_iter([0, 1, 2].into_iter());
+        let b = BitSet::from_iter([1, 2, 3].into_iter());
+        let intersection = a.intersection(b);
+
+        assert!(intersection.contains(1));
+        assert!(intersection.contains(2));
+        assert!(!intersection.contains(0));
+        assert!(!intersection.contains(3));
+        assert_eq!(intersection.len(), 2);
+    }
+
+    #[test]
+    fn test_bitset_difference() {
+        let a = BitSet::from_iter([0, 1, 2].into_iter());
+        let b = BitSet::from_iter([1, 2, 3].into_iter());
+        let diff = a.difference(b);
+
+        assert!(diff.contains(0));
+        assert!(!diff.contains(1));
+        assert!(!diff.contains(2));
+        assert_eq!(diff.len(), 1);
+    }
+
+    #[test]
+    fn test_bitset_is_subset_of() {
+        let a = BitSet::from_iter([1, 2].into_iter());
+        let b = BitSet::from_iter([0, 1, 2, 3].into_iter());
+
+        assert!(a.is_subset_of(b));
+        assert!(!b.is_subset_of(a));
+        assert!(a.is_subset_of(a));
+    }
+
+    #[test]
+    fn test_bitset_iter() {
+        let set = BitSet::from_iter([0, 2, 5].into_iter());
+        let elements: Vec<_> = set.iter().collect();
+
+        assert_eq!(elements, vec![0, 2, 5]);
+    }
+
+    // Additional JoinGraph tests
+
+    #[test]
+    fn test_join_graph_empty() {
+        let graph = JoinGraph::new();
+        assert_eq!(graph.node_count(), 0);
+    }
+
+    #[test]
+    fn test_join_graph_neighbors() {
+        let mut builder = JoinGraphBuilder::new();
+        builder.add_relation("a", create_node_scan("a", "A"));
+        builder.add_relation("b", create_node_scan("b", "B"));
+        builder.add_relation("c", create_node_scan("c", "C"));
+
+        builder.add_join_condition(
+            "a",
+            "b",
+            LogicalExpression::Variable("a".to_string()),
+            LogicalExpression::Variable("b".to_string()),
+        );
+        builder.add_join_condition(
+            "a",
+            "c",
+            LogicalExpression::Variable("a".to_string()),
+            LogicalExpression::Variable("c".to_string()),
+        );
+
+        let graph = builder.build();
+
+        // 'a' should have neighbors 'b' and 'c' (indices 1 and 2)
+        let neighbors_a: Vec<_> = graph.neighbors(0).collect();
+        assert_eq!(neighbors_a.len(), 2);
+        assert!(neighbors_a.contains(&1));
+        assert!(neighbors_a.contains(&2));
+
+        // 'b' should have only neighbor 'a'
+        let neighbors_b: Vec<_> = graph.neighbors(1).collect();
+        assert_eq!(neighbors_b.len(), 1);
+        assert!(neighbors_b.contains(&0));
+    }
+
+    #[test]
+    fn test_join_graph_are_connected() {
+        let mut builder = JoinGraphBuilder::new();
+        builder.add_relation("a", create_node_scan("a", "A"));
+        builder.add_relation("b", create_node_scan("b", "B"));
+        builder.add_relation("c", create_node_scan("c", "C"));
+
+        builder.add_join_condition(
+            "a",
+            "b",
+            LogicalExpression::Variable("a".to_string()),
+            LogicalExpression::Variable("b".to_string()),
+        );
+
+        let graph = builder.build();
+
+        let set_a = BitSet::singleton(0);
+        let set_b = BitSet::singleton(1);
+        let set_c = BitSet::singleton(2);
+
+        assert!(graph.are_connected(&set_a, &set_b));
+        assert!(graph.are_connected(&set_b, &set_a));
+        assert!(!graph.are_connected(&set_a, &set_c));
+        assert!(!graph.are_connected(&set_b, &set_c));
+    }
+
+    #[test]
+    fn test_join_graph_get_conditions() {
+        let mut builder = JoinGraphBuilder::new();
+        builder.add_relation("a", create_node_scan("a", "A"));
+        builder.add_relation("b", create_node_scan("b", "B"));
+
+        builder.add_join_condition(
+            "a",
+            "b",
+            LogicalExpression::Property {
+                variable: "a".to_string(),
+                property: "id".to_string(),
+            },
+            LogicalExpression::Property {
+                variable: "b".to_string(),
+                property: "a_id".to_string(),
+            },
+        );
+
+        let graph = builder.build();
+
+        let set_a = BitSet::singleton(0);
+        let set_b = BitSet::singleton(1);
+
+        let conditions = graph.get_conditions(&set_a, &set_b);
+        assert_eq!(conditions.len(), 1);
+    }
+
+    // Additional DPccp tests
+
+    #[test]
+    fn test_dpccp_empty_graph() {
+        let graph = JoinGraph::new();
+        let cost_model = CostModel::new();
+        let card_estimator = CardinalityEstimator::new();
+
+        let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
+        let plan = dpccp.optimize();
+
+        assert!(plan.is_none());
+    }
+
+    #[test]
+    fn test_dpccp_star_query() {
+        // Star schema: center connected to all others
+        // center -> a, center -> b, center -> c
+        let mut builder = JoinGraphBuilder::new();
+        builder.add_relation("center", create_node_scan("center", "Center"));
+        builder.add_relation("a", create_node_scan("a", "A"));
+        builder.add_relation("b", create_node_scan("b", "B"));
+        builder.add_relation("c", create_node_scan("c", "C"));
+
+        builder.add_join_condition(
+            "center",
+            "a",
+            LogicalExpression::Variable("center".to_string()),
+            LogicalExpression::Variable("a".to_string()),
+        );
+        builder.add_join_condition(
+            "center",
+            "b",
+            LogicalExpression::Variable("center".to_string()),
+            LogicalExpression::Variable("b".to_string()),
+        );
+        builder.add_join_condition(
+            "center",
+            "c",
+            LogicalExpression::Variable("center".to_string()),
+            LogicalExpression::Variable("c".to_string()),
+        );
+
+        let graph = builder.build();
+
+        let cost_model = CostModel::new();
+        let mut card_estimator = CardinalityEstimator::new();
+        card_estimator.add_table_stats(
+            "Center",
+            super::super::cardinality::TableStats::new(100),
+        );
+        card_estimator.add_table_stats("A", super::super::cardinality::TableStats::new(1000));
+        card_estimator.add_table_stats("B", super::super::cardinality::TableStats::new(500));
+        card_estimator.add_table_stats("C", super::super::cardinality::TableStats::new(200));
+
+        let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
+        let plan = dpccp.optimize();
+
+        assert!(plan.is_some());
+        let plan = plan.unwrap();
+        assert_eq!(plan.nodes.len(), 4);
+        assert!(plan.cost.total() > 0.0);
+    }
+
+    #[test]
+    fn test_dpccp_cycle_query() {
+        // Cycle: a -> b -> c -> a
+        let mut builder = JoinGraphBuilder::new();
+        builder.add_relation("a", create_node_scan("a", "A"));
+        builder.add_relation("b", create_node_scan("b", "B"));
+        builder.add_relation("c", create_node_scan("c", "C"));
+
+        builder.add_join_condition(
+            "a",
+            "b",
+            LogicalExpression::Variable("a".to_string()),
+            LogicalExpression::Variable("b".to_string()),
+        );
+        builder.add_join_condition(
+            "b",
+            "c",
+            LogicalExpression::Variable("b".to_string()),
+            LogicalExpression::Variable("c".to_string()),
+        );
+        builder.add_join_condition(
+            "c",
+            "a",
+            LogicalExpression::Variable("c".to_string()),
+            LogicalExpression::Variable("a".to_string()),
+        );
+
+        let graph = builder.build();
+
+        let cost_model = CostModel::new();
+        let mut card_estimator = CardinalityEstimator::new();
+        card_estimator.add_table_stats("A", super::super::cardinality::TableStats::new(100));
+        card_estimator.add_table_stats("B", super::super::cardinality::TableStats::new(100));
+        card_estimator.add_table_stats("C", super::super::cardinality::TableStats::new(100));
+
+        let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
+        let plan = dpccp.optimize();
+
+        assert!(plan.is_some());
+        let plan = plan.unwrap();
+        assert_eq!(plan.nodes.len(), 3);
+    }
+
+    #[test]
+    fn test_dpccp_four_relations() {
+        // Chain: a -> b -> c -> d
+        let mut builder = JoinGraphBuilder::new();
+        builder.add_relation("a", create_node_scan("a", "A"));
+        builder.add_relation("b", create_node_scan("b", "B"));
+        builder.add_relation("c", create_node_scan("c", "C"));
+        builder.add_relation("d", create_node_scan("d", "D"));
+
+        builder.add_join_condition(
+            "a",
+            "b",
+            LogicalExpression::Variable("a".to_string()),
+            LogicalExpression::Variable("b".to_string()),
+        );
+        builder.add_join_condition(
+            "b",
+            "c",
+            LogicalExpression::Variable("b".to_string()),
+            LogicalExpression::Variable("c".to_string()),
+        );
+        builder.add_join_condition(
+            "c",
+            "d",
+            LogicalExpression::Variable("c".to_string()),
+            LogicalExpression::Variable("d".to_string()),
+        );
+
+        let graph = builder.build();
+
+        let cost_model = CostModel::new();
+        let mut card_estimator = CardinalityEstimator::new();
+        card_estimator.add_table_stats("A", super::super::cardinality::TableStats::new(100));
+        card_estimator.add_table_stats("B", super::super::cardinality::TableStats::new(200));
+        card_estimator.add_table_stats("C", super::super::cardinality::TableStats::new(300));
+        card_estimator.add_table_stats("D", super::super::cardinality::TableStats::new(400));
+
+        let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
+        let plan = dpccp.optimize();
+
+        assert!(plan.is_some());
+        let plan = plan.unwrap();
+        assert_eq!(plan.nodes.len(), 4);
+    }
+
+    #[test]
+    fn test_join_plan_cardinality_and_cost() {
+        let mut builder = JoinGraphBuilder::new();
+        builder.add_relation("a", create_node_scan("a", "A"));
+        builder.add_relation("b", create_node_scan("b", "B"));
+
+        builder.add_join_condition(
+            "a",
+            "b",
+            LogicalExpression::Variable("a".to_string()),
+            LogicalExpression::Variable("b".to_string()),
+        );
+
+        let graph = builder.build();
+
+        let cost_model = CostModel::new();
+        let mut card_estimator = CardinalityEstimator::new();
+        card_estimator.add_table_stats("A", super::super::cardinality::TableStats::new(100));
+        card_estimator.add_table_stats("B", super::super::cardinality::TableStats::new(200));
+
+        let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
+        let plan = dpccp.optimize().unwrap();
+
+        // Plan should have non-zero cardinality and cost
+        assert!(plan.cardinality > 0.0);
+        assert!(plan.cost.total() > 0.0);
+    }
+
+    #[test]
+    fn test_join_graph_default() {
+        let graph = JoinGraph::default();
+        assert_eq!(graph.node_count(), 0);
+    }
+
+    #[test]
+    fn test_join_graph_builder_default() {
+        let builder = JoinGraphBuilder::default();
+        let graph = builder.build();
+        assert_eq!(graph.node_count(), 0);
+    }
+
+    #[test]
+    fn test_join_graph_nodes_accessor() {
+        let mut builder = JoinGraphBuilder::new();
+        builder.add_relation("a", create_node_scan("a", "A"));
+        builder.add_relation("b", create_node_scan("b", "B"));
+
+        let graph = builder.build();
+        let nodes = graph.nodes();
+
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].variable, "a");
+        assert_eq!(nodes[1].variable, "b");
+    }
+
+    #[test]
+    fn test_join_node_equality() {
+        let node1 = JoinNode {
+            id: 0,
+            variable: "a".to_string(),
+            relation: create_node_scan("a", "A"),
+        };
+        let node2 = JoinNode {
+            id: 0,
+            variable: "a".to_string(),
+            relation: create_node_scan("a", "A"),
+        };
+        let node3 = JoinNode {
+            id: 1,
+            variable: "a".to_string(),
+            relation: create_node_scan("a", "A"),
+        };
+
+        assert_eq!(node1, node2);
+        assert_ne!(node1, node3);
+    }
+
+    #[test]
+    fn test_join_node_hash() {
+        use std::collections::HashSet;
+
+        let node1 = JoinNode {
+            id: 0,
+            variable: "a".to_string(),
+            relation: create_node_scan("a", "A"),
+        };
+        let node2 = JoinNode {
+            id: 0,
+            variable: "a".to_string(),
+            relation: create_node_scan("a", "A"),
+        };
+
+        let mut set = HashSet::new();
+        set.insert(node1.clone());
+
+        // Same id and variable should be considered equal
+        assert!(set.contains(&node2));
+    }
+
+    #[test]
+    fn test_add_join_condition_unknown_variable() {
+        let mut builder = JoinGraphBuilder::new();
+        builder.add_relation("a", create_node_scan("a", "A"));
+
+        // Adding condition with unknown variable should do nothing (no panic)
+        builder.add_join_condition(
+            "a",
+            "unknown",
+            LogicalExpression::Variable("a".to_string()),
+            LogicalExpression::Variable("unknown".to_string()),
+        );
+
+        let graph = builder.build();
+        assert_eq!(graph.node_count(), 1);
+    }
+
+    #[test]
+    fn test_dpccp_with_different_cardinalities() {
+        // Test that DPccp handles vastly different cardinalities
+        let mut builder = JoinGraphBuilder::new();
+        builder.add_relation("tiny", create_node_scan("tiny", "Tiny"));
+        builder.add_relation("huge", create_node_scan("huge", "Huge"));
+
+        builder.add_join_condition(
+            "tiny",
+            "huge",
+            LogicalExpression::Variable("tiny".to_string()),
+            LogicalExpression::Variable("huge".to_string()),
+        );
+
+        let graph = builder.build();
+
+        let cost_model = CostModel::new();
+        let mut card_estimator = CardinalityEstimator::new();
+        card_estimator.add_table_stats("Tiny", super::super::cardinality::TableStats::new(10));
+        card_estimator.add_table_stats(
+            "Huge",
+            super::super::cardinality::TableStats::new(1000000),
+        );
+
+        let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
+        let plan = dpccp.optimize();
+
+        assert!(plan.is_some());
+        let plan = plan.unwrap();
+        assert_eq!(plan.nodes.len(), 2);
+    }
 }

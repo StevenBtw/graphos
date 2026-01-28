@@ -171,7 +171,7 @@ impl RdfStatistics {
         if let Some(pred) = predicate_iri {
             if let Some(stats) = self.predicates.get(pred) {
                 // Use predicate's object statistics for filter estimation
-                if let Some(ref hist) = stats.object_histogram {
+                if let Some(ref _hist) = stats.object_histogram {
                     // Assume filters reduce to ~33% of values
                     return 0.33;
                 }

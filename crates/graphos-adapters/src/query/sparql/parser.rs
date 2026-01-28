@@ -10,6 +10,8 @@ use graphos_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     current: Token,
+    /// Source string for error reporting.
+    #[allow(dead_code)]
     source: &'a str,
 }
 

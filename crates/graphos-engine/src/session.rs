@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use graphos_common::types::{NodeId, TxId, Value};
+use graphos_common::types::{EpochId, NodeId, TxId, Value};
 use graphos_common::utils::error::Result;
 use graphos_core::graph::lpg::LpgStore;
 
@@ -73,13 +73,69 @@ impl Session {
         let optimizer = Optimizer::new();
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
-        // Convert to physical plan
-        let planner = Planner::new(Arc::clone(&self.store));
+        // Get transaction context for MVCC visibility
+        let (viewing_epoch, tx_id) = self.get_transaction_context();
+
+        // Convert to physical plan with transaction context
+        let planner = Planner::with_context(
+            Arc::clone(&self.store),
+            Arc::clone(&self.tx_manager),
+            tx_id,
+            viewing_epoch,
+        );
         let mut physical_plan = planner.plan(&optimized_plan)?;
 
         // Execute the plan
         let executor = Executor::with_columns(physical_plan.columns.clone());
         executor.execute(physical_plan.operator.as_mut())
+    }
+
+    /// Executes a GQL query with parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails to parse or execute.
+    #[cfg(feature = "gql")]
+    pub fn execute_with_params(
+        &self,
+        query: &str,
+        params: std::collections::HashMap<String, Value>,
+    ) -> Result<QueryResult> {
+        use crate::query::processor::{QueryLanguage, QueryProcessor};
+
+        // Get transaction context for MVCC visibility
+        let (viewing_epoch, tx_id) = self.get_transaction_context();
+
+        // Create processor with transaction context
+        let processor = QueryProcessor::for_lpg_with_tx(
+            Arc::clone(&self.store),
+            Arc::clone(&self.tx_manager),
+        );
+
+        // Apply transaction context if in a transaction
+        let processor = if let Some(tx_id) = tx_id {
+            processor.with_tx_context(viewing_epoch, tx_id)
+        } else {
+            processor
+        };
+
+        processor.process(query, QueryLanguage::Gql, Some(&params))
+    }
+
+    /// Executes a GQL query with parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no query language is enabled.
+    #[cfg(not(any(feature = "gql", feature = "cypher")))]
+    pub fn execute_with_params(
+        &self,
+        _query: &str,
+        _params: std::collections::HashMap<String, Value>,
+    ) -> Result<QueryResult> {
+        Err(graphos_common::utils::error::Error::Internal(
+            "No query language enabled".to_string(),
+        ))
     }
 
     /// Executes a GQL query.
@@ -114,8 +170,16 @@ impl Session {
         let optimizer = Optimizer::new();
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
-        // Convert to physical plan
-        let planner = Planner::new(Arc::clone(&self.store));
+        // Get transaction context for MVCC visibility
+        let (viewing_epoch, tx_id) = self.get_transaction_context();
+
+        // Convert to physical plan with transaction context
+        let planner = Planner::with_context(
+            Arc::clone(&self.store),
+            Arc::clone(&self.tx_manager),
+            tx_id,
+            viewing_epoch,
+        );
         let mut physical_plan = planner.plan(&optimized_plan)?;
 
         // Execute the plan
@@ -158,13 +222,53 @@ impl Session {
         let optimizer = Optimizer::new();
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
-        // Convert to physical plan
-        let planner = Planner::new(Arc::clone(&self.store));
+        // Get transaction context for MVCC visibility
+        let (viewing_epoch, tx_id) = self.get_transaction_context();
+
+        // Convert to physical plan with transaction context
+        let planner = Planner::with_context(
+            Arc::clone(&self.store),
+            Arc::clone(&self.tx_manager),
+            tx_id,
+            viewing_epoch,
+        );
         let mut physical_plan = planner.plan(&optimized_plan)?;
 
         // Execute the plan
         let executor = Executor::with_columns(physical_plan.columns.clone());
         executor.execute(physical_plan.operator.as_mut())
+    }
+
+    /// Executes a Gremlin query with parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails to parse or execute.
+    #[cfg(feature = "gremlin")]
+    pub fn execute_gremlin_with_params(
+        &self,
+        query: &str,
+        params: std::collections::HashMap<String, Value>,
+    ) -> Result<QueryResult> {
+        use crate::query::processor::{QueryLanguage, QueryProcessor};
+
+        // Get transaction context for MVCC visibility
+        let (viewing_epoch, tx_id) = self.get_transaction_context();
+
+        // Create processor with transaction context
+        let processor = QueryProcessor::for_lpg_with_tx(
+            Arc::clone(&self.store),
+            Arc::clone(&self.tx_manager),
+        );
+
+        // Apply transaction context if in a transaction
+        let processor = if let Some(tx_id) = tx_id {
+            processor.with_tx_context(viewing_epoch, tx_id)
+        } else {
+            processor
+        };
+
+        processor.process(query, QueryLanguage::Gremlin, Some(&params))
     }
 
     /// Executes a GraphQL query against the LPG store.
@@ -202,13 +306,53 @@ impl Session {
         let optimizer = Optimizer::new();
         let optimized_plan = optimizer.optimize(logical_plan)?;
 
-        // Convert to physical plan
-        let planner = Planner::new(Arc::clone(&self.store));
+        // Get transaction context for MVCC visibility
+        let (viewing_epoch, tx_id) = self.get_transaction_context();
+
+        // Convert to physical plan with transaction context
+        let planner = Planner::with_context(
+            Arc::clone(&self.store),
+            Arc::clone(&self.tx_manager),
+            tx_id,
+            viewing_epoch,
+        );
         let mut physical_plan = planner.plan(&optimized_plan)?;
 
         // Execute the plan
         let executor = Executor::with_columns(physical_plan.columns.clone());
         executor.execute(physical_plan.operator.as_mut())
+    }
+
+    /// Executes a GraphQL query with parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails to parse or execute.
+    #[cfg(feature = "graphql")]
+    pub fn execute_graphql_with_params(
+        &self,
+        query: &str,
+        params: std::collections::HashMap<String, Value>,
+    ) -> Result<QueryResult> {
+        use crate::query::processor::{QueryLanguage, QueryProcessor};
+
+        // Get transaction context for MVCC visibility
+        let (viewing_epoch, tx_id) = self.get_transaction_context();
+
+        // Create processor with transaction context
+        let processor = QueryProcessor::for_lpg_with_tx(
+            Arc::clone(&self.store),
+            Arc::clone(&self.tx_manager),
+        );
+
+        // Apply transaction context if in a transaction
+        let processor = if let Some(tx_id) = tx_id {
+            processor.with_tx_context(viewing_epoch, tx_id)
+        } else {
+            processor
+        };
+
+        processor.process(query, QueryLanguage::GraphQL, Some(&params))
     }
 
     /// Begins a new transaction.
@@ -260,7 +404,7 @@ impl Session {
             )
         })?;
 
-        self.tx_manager.commit(tx_id)
+        self.tx_manager.commit(tx_id).map(|_| ())
     }
 
     /// Aborts the current transaction.
@@ -292,6 +436,10 @@ impl Session {
             )
         })?;
 
+        // Discard uncommitted versions in the store
+        self.store.discard_uncommitted_versions(tx_id);
+
+        // Mark transaction as aborted in the manager
         self.tx_manager.abort(tx_id)
     }
 
@@ -312,33 +460,66 @@ impl Session {
         self.auto_commit
     }
 
+    /// Returns the current transaction context for MVCC visibility.
+    ///
+    /// Returns `(viewing_epoch, tx_id)` where:
+    /// - `viewing_epoch` is the epoch at which to check version visibility
+    /// - `tx_id` is the current transaction ID (if in a transaction)
+    #[must_use]
+    fn get_transaction_context(&self) -> (EpochId, Option<TxId>) {
+        if let Some(tx_id) = self.current_tx {
+            // In a transaction - use the transaction's start epoch
+            let epoch = self
+                .tx_manager
+                .start_epoch(tx_id)
+                .unwrap_or_else(|| self.tx_manager.current_epoch());
+            (epoch, Some(tx_id))
+        } else {
+            // No transaction - use current epoch
+            (self.tx_manager.current_epoch(), None)
+        }
+    }
+
     /// Creates a node directly (bypassing query execution).
     ///
     /// This is a low-level API for testing and direct manipulation.
+    /// If a transaction is active, the node will be versioned with the transaction ID.
     pub fn create_node(&self, labels: &[&str]) -> NodeId {
-        self.store.create_node(labels)
+        let (epoch, tx_id) = self.get_transaction_context();
+        self.store
+            .create_node_versioned(labels, epoch, tx_id.unwrap_or(TxId::SYSTEM))
     }
 
     /// Creates a node with properties.
+    ///
+    /// If a transaction is active, the node will be versioned with the transaction ID.
     pub fn create_node_with_props<'a>(
         &self,
         labels: &[&str],
         properties: impl IntoIterator<Item = (&'a str, Value)>,
     ) -> NodeId {
-        self.store
-            .create_node_with_props(labels, properties.into_iter().map(|(k, v)| (k, v)))
+        let (epoch, tx_id) = self.get_transaction_context();
+        self.store.create_node_with_props_versioned(
+            labels,
+            properties.into_iter().map(|(k, v)| (k, v)),
+            epoch,
+            tx_id.unwrap_or(TxId::SYSTEM),
+        )
     }
 
     /// Creates an edge between two nodes.
     ///
     /// This is a low-level API for testing and direct manipulation.
+    /// If a transaction is active, the edge will be versioned with the transaction ID.
     pub fn create_edge(
         &self,
         src: NodeId,
         dst: NodeId,
         edge_type: &str,
     ) -> graphos_common::types::EdgeId {
-        self.store.create_edge(src, dst, edge_type)
+        let (epoch, tx_id) = self.get_transaction_context();
+        self.store
+            .create_edge_versioned(src, dst, edge_type, epoch, tx_id.unwrap_or(TxId::SYSTEM))
     }
 }
 
@@ -371,6 +552,30 @@ mod tests {
     }
 
     #[test]
+    fn test_session_transaction_context() {
+        let db = GraphosDB::new_in_memory();
+        let mut session = db.session();
+
+        // Without transaction - context should have current epoch and no tx_id
+        let (_epoch1, tx_id1) = session.get_transaction_context();
+        assert!(tx_id1.is_none());
+
+        // Start a transaction
+        session.begin_tx().unwrap();
+        let (epoch2, tx_id2) = session.get_transaction_context();
+        assert!(tx_id2.is_some());
+        // Transaction should have a valid epoch
+        let _ = epoch2; // Use the variable
+
+        // Commit and verify
+        session.commit().unwrap();
+        let (epoch3, tx_id3) = session.get_transaction_context();
+        assert!(tx_id3.is_none());
+        // Epoch should have advanced after commit
+        assert!(epoch3.as_u64() >= epoch2.as_u64());
+    }
+
+    #[test]
     fn test_session_rollback() {
         let db = GraphosDB::new_in_memory();
         let mut session = db.session();
@@ -378,6 +583,127 @@ mod tests {
         session.begin_tx().unwrap();
         session.rollback().unwrap();
         assert!(!session.in_transaction());
+    }
+
+    #[test]
+    fn test_session_rollback_discards_versions() {
+        use graphos_common::types::TxId;
+
+        let db = GraphosDB::new_in_memory();
+
+        // Create a node outside of any transaction (at system level)
+        let node_before = db.store().create_node(&["Person"]);
+        assert!(node_before.is_valid());
+        assert_eq!(db.node_count(), 1, "Should have 1 node before transaction");
+
+        // Start a transaction
+        let mut session = db.session();
+        session.begin_tx().unwrap();
+        let tx_id = session.current_tx.unwrap();
+
+        // Create a node versioned with the transaction's ID
+        let epoch = db.store().current_epoch();
+        let node_in_tx = db.store().create_node_versioned(&["Person"], epoch, tx_id);
+        assert!(node_in_tx.is_valid());
+
+        // Should see 2 nodes at this point
+        assert_eq!(db.node_count(), 2, "Should have 2 nodes during transaction");
+
+        // Rollback the transaction
+        session.rollback().unwrap();
+        assert!(!session.in_transaction());
+
+        // The node created in the transaction should be discarded
+        // Only the first node should remain visible
+        let count_after = db.node_count();
+        assert_eq!(
+            count_after, 1,
+            "Rollback should discard uncommitted node, but got {count_after}"
+        );
+
+        // The original node should still be accessible
+        let current_epoch = db.store().current_epoch();
+        assert!(
+            db.store()
+                .get_node_versioned(node_before, current_epoch, TxId::SYSTEM)
+                .is_some(),
+            "Original node should still exist"
+        );
+
+        // The node created in the transaction should not be accessible
+        assert!(
+            db.store()
+                .get_node_versioned(node_in_tx, current_epoch, TxId::SYSTEM)
+                .is_none(),
+            "Transaction node should be gone"
+        );
+    }
+
+    #[test]
+    fn test_session_create_node_in_transaction() {
+        // Test that session.create_node() is transaction-aware
+        let db = GraphosDB::new_in_memory();
+
+        // Create a node outside of any transaction
+        let node_before = db.create_node(&["Person"]);
+        assert!(node_before.is_valid());
+        assert_eq!(db.node_count(), 1, "Should have 1 node before transaction");
+
+        // Start a transaction and create a node through the session
+        let mut session = db.session();
+        session.begin_tx().unwrap();
+
+        // Create a node through session.create_node() - should be versioned with tx
+        let node_in_tx = session.create_node(&["Person"]);
+        assert!(node_in_tx.is_valid());
+
+        // Should see 2 nodes at this point
+        assert_eq!(db.node_count(), 2, "Should have 2 nodes during transaction");
+
+        // Rollback the transaction
+        session.rollback().unwrap();
+
+        // The node created via session.create_node() should be discarded
+        let count_after = db.node_count();
+        assert_eq!(
+            count_after, 1,
+            "Rollback should discard node created via session.create_node(), but got {count_after}"
+        );
+    }
+
+    #[test]
+    fn test_session_create_node_with_props_in_transaction() {
+        use graphos_common::types::Value;
+
+        // Test that session.create_node_with_props() is transaction-aware
+        let db = GraphosDB::new_in_memory();
+
+        // Create a node outside of any transaction
+        db.create_node(&["Person"]);
+        assert_eq!(db.node_count(), 1, "Should have 1 node before transaction");
+
+        // Start a transaction and create a node with properties
+        let mut session = db.session();
+        session.begin_tx().unwrap();
+
+        let node_in_tx = session.create_node_with_props(
+            &["Person"],
+            [("name", Value::String("Alice".into()))],
+        );
+        assert!(node_in_tx.is_valid());
+
+        // Should see 2 nodes
+        assert_eq!(db.node_count(), 2, "Should have 2 nodes during transaction");
+
+        // Rollback the transaction
+        session.rollback().unwrap();
+
+        // The node should be discarded
+        let count_after = db.node_count();
+        assert_eq!(
+            count_after, 1,
+            "Rollback should discard node created via session.create_node_with_props()"
+        );
     }
 
     #[cfg(feature = "gql")]

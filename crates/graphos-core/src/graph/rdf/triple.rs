@@ -95,7 +95,10 @@ impl fmt::Display for Triple {
 }
 
 /// A quad extends a triple with a graph name.
+///
+/// Note: This type is provided for future named graph support.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct Quad {
     /// The subject.
     subject: Term,
@@ -107,6 +110,7 @@ pub struct Quad {
     graph: Option<Term>,
 }
 
+#[allow(dead_code)]
 impl Quad {
     /// Creates a new quad in the default graph.
     pub fn new(subject: Term, predicate: Term, object: Term) -> Self {

@@ -370,6 +370,24 @@ impl Optimizer {
                     self.collect_variables(item, vars);
                 }
             }
+            LogicalExpression::Map(pairs) => {
+                for (_, value) in pairs {
+                    self.collect_variables(value, vars);
+                }
+            }
+            LogicalExpression::IndexAccess { base, index } => {
+                self.collect_variables(base, vars);
+                self.collect_variables(index, vars);
+            }
+            LogicalExpression::SliceAccess { base, start, end } => {
+                self.collect_variables(base, vars);
+                if let Some(s) = start {
+                    self.collect_variables(s, vars);
+                }
+                if let Some(e) = end {
+                    self.collect_variables(e, vars);
+                }
+            }
             LogicalExpression::Case {
                 operand,
                 when_clauses,
@@ -392,6 +410,21 @@ impl Optimizer {
                 vars.insert(var.clone());
             }
             LogicalExpression::Literal(_) | LogicalExpression::Parameter(_) => {}
+            LogicalExpression::ListComprehension {
+                list_expr,
+                filter_expr,
+                map_expr,
+                ..
+            } => {
+                self.collect_variables(list_expr, vars);
+                if let Some(filter) = filter_expr {
+                    self.collect_variables(filter, vars);
+                }
+                self.collect_variables(map_expr, vars);
+            }
+            LogicalExpression::ExistsSubquery(_) | LogicalExpression::CountSubquery(_) => {
+                // Subqueries have their own variable scope
+            }
         }
     }
 
@@ -417,7 +450,9 @@ impl Default for Optimizer {
 mod tests {
     use super::*;
     use crate::query::plan::{
-        BinaryOp, ExpandDirection, ExpandOp, NodeScanOp, ReturnItem, ReturnOp,
+        AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, DistinctOp, ExpandDirection,
+        ExpandOp, JoinOp, JoinType, LimitOp, NodeScanOp, ProjectOp, Projection, ReturnItem,
+        ReturnOp, SkipOp, SortKey, SortOp, SortOrder, UnaryOp,
     };
     use graphos_common::types::Value;
 
@@ -599,5 +634,650 @@ mod tests {
         let vars = optimizer.extract_variables(&expr);
         assert_eq!(vars.len(), 1);
         assert!(vars.contains("n"));
+    }
+
+    // Additional tests for optimizer configuration
+
+    #[test]
+    fn test_optimizer_default() {
+        let optimizer = Optimizer::default();
+        // Should be able to optimize an empty plan
+        let plan = LogicalPlan::new(LogicalOperator::Empty);
+        let result = optimizer.optimize(plan);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_optimizer_with_filter_pushdown_disabled() {
+        let optimizer = Optimizer::new().with_filter_pushdown(false);
+
+        let plan = LogicalPlan::new(LogicalOperator::Return(ReturnOp {
+            items: vec![ReturnItem {
+                expression: LogicalExpression::Variable("n".to_string()),
+                alias: None,
+            }],
+            distinct: false,
+            input: Box::new(LogicalOperator::Filter(FilterOp {
+                predicate: LogicalExpression::Literal(Value::Bool(true)),
+                input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "n".to_string(),
+                    label: None,
+                    input: None,
+                })),
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+        // Structure should be unchanged
+        if let LogicalOperator::Return(ret) = &optimized.root {
+            if let LogicalOperator::Filter(_) = ret.input.as_ref() {
+                return;
+            }
+        }
+        panic!("Expected unchanged structure");
+    }
+
+    #[test]
+    fn test_optimizer_with_join_reorder_disabled() {
+        let optimizer = Optimizer::new().with_join_reorder(false);
+        assert!(optimizer.optimize(LogicalPlan::new(LogicalOperator::Empty)).is_ok());
+    }
+
+    #[test]
+    fn test_optimizer_with_cost_model() {
+        let cost_model = CostModel::new();
+        let optimizer = Optimizer::new().with_cost_model(cost_model);
+        assert!(optimizer.cost_model().estimate(&LogicalOperator::Empty, 0.0).total() < 0.001);
+    }
+
+    #[test]
+    fn test_optimizer_with_cardinality_estimator() {
+        let mut estimator = CardinalityEstimator::new();
+        estimator.add_table_stats("Test", TableStats::new(500));
+        let optimizer = Optimizer::new().with_cardinality_estimator(estimator);
+
+        let scan = LogicalOperator::NodeScan(NodeScanOp {
+            variable: "n".to_string(),
+            label: Some("Test".to_string()),
+            input: None,
+        });
+        let plan = LogicalPlan::new(scan);
+
+        let cardinality = optimizer.estimate_cardinality(&plan);
+        assert!((cardinality - 500.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_optimizer_estimate_cost() {
+        let optimizer = Optimizer::new();
+        let plan = LogicalPlan::new(LogicalOperator::NodeScan(NodeScanOp {
+            variable: "n".to_string(),
+            label: None,
+            input: None,
+        }));
+
+        let cost = optimizer.estimate_cost(&plan);
+        assert!(cost.total() > 0.0);
+    }
+
+    // Filter pushdown through various operators
+
+    #[test]
+    fn test_filter_pushdown_through_project() {
+        let optimizer = Optimizer::new();
+
+        let plan = LogicalPlan::new(LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Property {
+                    variable: "n".to_string(),
+                    property: "age".to_string(),
+                }),
+                op: BinaryOp::Gt,
+                right: Box::new(LogicalExpression::Literal(Value::Int64(30))),
+            },
+            input: Box::new(LogicalOperator::Project(ProjectOp {
+                projections: vec![Projection {
+                    expression: LogicalExpression::Variable("n".to_string()),
+                    alias: None,
+                }],
+                input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "n".to_string(),
+                    label: None,
+                    input: None,
+                })),
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+
+        // Filter should be pushed through Project
+        if let LogicalOperator::Project(proj) = &optimized.root {
+            if let LogicalOperator::Filter(_) = proj.input.as_ref() {
+                return;
+            }
+        }
+        panic!("Expected Project -> Filter structure");
+    }
+
+    #[test]
+    fn test_filter_not_pushed_through_project_with_alias() {
+        let optimizer = Optimizer::new();
+
+        // Filter on computed column 'x' should not be pushed through project that creates 'x'
+        let plan = LogicalPlan::new(LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Variable("x".to_string())),
+                op: BinaryOp::Gt,
+                right: Box::new(LogicalExpression::Literal(Value::Int64(30))),
+            },
+            input: Box::new(LogicalOperator::Project(ProjectOp {
+                projections: vec![Projection {
+                    expression: LogicalExpression::Property {
+                        variable: "n".to_string(),
+                        property: "age".to_string(),
+                    },
+                    alias: Some("x".to_string()),
+                }],
+                input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "n".to_string(),
+                    label: None,
+                    input: None,
+                })),
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+
+        // Filter should stay above Project
+        if let LogicalOperator::Filter(filter) = &optimized.root {
+            if let LogicalOperator::Project(_) = filter.input.as_ref() {
+                return;
+            }
+        }
+        panic!("Expected Filter -> Project structure");
+    }
+
+    #[test]
+    fn test_filter_pushdown_through_limit() {
+        let optimizer = Optimizer::new();
+
+        let plan = LogicalPlan::new(LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Literal(Value::Bool(true)),
+            input: Box::new(LogicalOperator::Limit(LimitOp {
+                count: 10,
+                input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "n".to_string(),
+                    label: None,
+                    input: None,
+                })),
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+
+        // Filter stays above Limit (cannot be pushed through)
+        if let LogicalOperator::Filter(filter) = &optimized.root {
+            if let LogicalOperator::Limit(_) = filter.input.as_ref() {
+                return;
+            }
+        }
+        panic!("Expected Filter -> Limit structure");
+    }
+
+    #[test]
+    fn test_filter_pushdown_through_sort() {
+        let optimizer = Optimizer::new();
+
+        let plan = LogicalPlan::new(LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Literal(Value::Bool(true)),
+            input: Box::new(LogicalOperator::Sort(SortOp {
+                keys: vec![SortKey {
+                    expression: LogicalExpression::Variable("n".to_string()),
+                    order: SortOrder::Ascending,
+                }],
+                input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "n".to_string(),
+                    label: None,
+                    input: None,
+                })),
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+
+        // Filter stays above Sort
+        if let LogicalOperator::Filter(filter) = &optimized.root {
+            if let LogicalOperator::Sort(_) = filter.input.as_ref() {
+                return;
+            }
+        }
+        panic!("Expected Filter -> Sort structure");
+    }
+
+    #[test]
+    fn test_filter_pushdown_through_distinct() {
+        let optimizer = Optimizer::new();
+
+        let plan = LogicalPlan::new(LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Literal(Value::Bool(true)),
+            input: Box::new(LogicalOperator::Distinct(DistinctOp {
+                input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "n".to_string(),
+                    label: None,
+                    input: None,
+                })),
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+
+        // Filter stays above Distinct
+        if let LogicalOperator::Filter(filter) = &optimized.root {
+            if let LogicalOperator::Distinct(_) = filter.input.as_ref() {
+                return;
+            }
+        }
+        panic!("Expected Filter -> Distinct structure");
+    }
+
+    #[test]
+    fn test_filter_not_pushed_through_aggregate() {
+        let optimizer = Optimizer::new();
+
+        let plan = LogicalPlan::new(LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Variable("cnt".to_string())),
+                op: BinaryOp::Gt,
+                right: Box::new(LogicalExpression::Literal(Value::Int64(10))),
+            },
+            input: Box::new(LogicalOperator::Aggregate(AggregateOp {
+                group_by: vec![],
+                aggregates: vec![AggregateExpr {
+                    function: AggregateFunction::Count,
+                    expression: None,
+                    distinct: false,
+                    alias: Some("cnt".to_string()),
+                }],
+                input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "n".to_string(),
+                    label: None,
+                    input: None,
+                })),
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+
+        // Filter should stay above Aggregate
+        if let LogicalOperator::Filter(filter) = &optimized.root {
+            if let LogicalOperator::Aggregate(_) = filter.input.as_ref() {
+                return;
+            }
+        }
+        panic!("Expected Filter -> Aggregate structure");
+    }
+
+    #[test]
+    fn test_filter_pushdown_to_left_join_side() {
+        let optimizer = Optimizer::new();
+
+        // Filter on left variable should be pushed to left side
+        let plan = LogicalPlan::new(LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Property {
+                    variable: "a".to_string(),
+                    property: "age".to_string(),
+                }),
+                op: BinaryOp::Gt,
+                right: Box::new(LogicalExpression::Literal(Value::Int64(30))),
+            },
+            input: Box::new(LogicalOperator::Join(JoinOp {
+                left: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "a".to_string(),
+                    label: Some("Person".to_string()),
+                    input: None,
+                })),
+                right: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "b".to_string(),
+                    label: Some("Company".to_string()),
+                    input: None,
+                })),
+                join_type: JoinType::Inner,
+                conditions: vec![],
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+
+        // Filter should be pushed to left side of join
+        if let LogicalOperator::Join(join) = &optimized.root {
+            if let LogicalOperator::Filter(_) = join.left.as_ref() {
+                return;
+            }
+        }
+        panic!("Expected Join with Filter on left side");
+    }
+
+    #[test]
+    fn test_filter_pushdown_to_right_join_side() {
+        let optimizer = Optimizer::new();
+
+        // Filter on right variable should be pushed to right side
+        let plan = LogicalPlan::new(LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Property {
+                    variable: "b".to_string(),
+                    property: "name".to_string(),
+                }),
+                op: BinaryOp::Eq,
+                right: Box::new(LogicalExpression::Literal(Value::String("Acme".into()))),
+            },
+            input: Box::new(LogicalOperator::Join(JoinOp {
+                left: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "a".to_string(),
+                    label: Some("Person".to_string()),
+                    input: None,
+                })),
+                right: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "b".to_string(),
+                    label: Some("Company".to_string()),
+                    input: None,
+                })),
+                join_type: JoinType::Inner,
+                conditions: vec![],
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+
+        // Filter should be pushed to right side of join
+        if let LogicalOperator::Join(join) = &optimized.root {
+            if let LogicalOperator::Filter(_) = join.right.as_ref() {
+                return;
+            }
+        }
+        panic!("Expected Join with Filter on right side");
+    }
+
+    #[test]
+    fn test_filter_not_pushed_when_uses_both_join_sides() {
+        let optimizer = Optimizer::new();
+
+        // Filter using both variables should stay above join
+        let plan = LogicalPlan::new(LogicalOperator::Filter(FilterOp {
+            predicate: LogicalExpression::Binary {
+                left: Box::new(LogicalExpression::Property {
+                    variable: "a".to_string(),
+                    property: "id".to_string(),
+                }),
+                op: BinaryOp::Eq,
+                right: Box::new(LogicalExpression::Property {
+                    variable: "b".to_string(),
+                    property: "a_id".to_string(),
+                }),
+            },
+            input: Box::new(LogicalOperator::Join(JoinOp {
+                left: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "a".to_string(),
+                    label: None,
+                    input: None,
+                })),
+                right: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                    variable: "b".to_string(),
+                    label: None,
+                    input: None,
+                })),
+                join_type: JoinType::Inner,
+                conditions: vec![],
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+
+        // Filter should stay above join
+        if let LogicalOperator::Filter(filter) = &optimized.root {
+            if let LogicalOperator::Join(_) = filter.input.as_ref() {
+                return;
+            }
+        }
+        panic!("Expected Filter -> Join structure");
+    }
+
+    // Variable extraction tests
+
+    #[test]
+    fn test_extract_variables_from_variable() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::Variable("x".to_string());
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 1);
+        assert!(vars.contains("x"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_unary() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::Unary {
+            op: UnaryOp::Not,
+            operand: Box::new(LogicalExpression::Variable("x".to_string())),
+        };
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 1);
+        assert!(vars.contains("x"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_function_call() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::FunctionCall {
+            name: "length".to_string(),
+            args: vec![
+                LogicalExpression::Variable("a".to_string()),
+                LogicalExpression::Variable("b".to_string()),
+            ],
+        };
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 2);
+        assert!(vars.contains("a"));
+        assert!(vars.contains("b"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_list() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::List(vec![
+            LogicalExpression::Variable("a".to_string()),
+            LogicalExpression::Literal(Value::Int64(1)),
+            LogicalExpression::Variable("b".to_string()),
+        ]);
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 2);
+        assert!(vars.contains("a"));
+        assert!(vars.contains("b"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_map() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::Map(vec![
+            ("key1".to_string(), LogicalExpression::Variable("a".to_string())),
+            ("key2".to_string(), LogicalExpression::Variable("b".to_string())),
+        ]);
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 2);
+        assert!(vars.contains("a"));
+        assert!(vars.contains("b"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_index_access() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::IndexAccess {
+            base: Box::new(LogicalExpression::Variable("list".to_string())),
+            index: Box::new(LogicalExpression::Variable("idx".to_string())),
+        };
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 2);
+        assert!(vars.contains("list"));
+        assert!(vars.contains("idx"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_slice_access() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::SliceAccess {
+            base: Box::new(LogicalExpression::Variable("list".to_string())),
+            start: Some(Box::new(LogicalExpression::Variable("s".to_string()))),
+            end: Some(Box::new(LogicalExpression::Variable("e".to_string()))),
+        };
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 3);
+        assert!(vars.contains("list"));
+        assert!(vars.contains("s"));
+        assert!(vars.contains("e"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_case() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::Case {
+            operand: Some(Box::new(LogicalExpression::Variable("x".to_string()))),
+            when_clauses: vec![(
+                LogicalExpression::Literal(Value::Int64(1)),
+                LogicalExpression::Variable("a".to_string()),
+            )],
+            else_clause: Some(Box::new(LogicalExpression::Variable("b".to_string()))),
+        };
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 3);
+        assert!(vars.contains("x"));
+        assert!(vars.contains("a"));
+        assert!(vars.contains("b"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_labels() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::Labels("n".to_string());
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 1);
+        assert!(vars.contains("n"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_type() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::Type("e".to_string());
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 1);
+        assert!(vars.contains("e"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_id() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::Id("n".to_string());
+        let vars = optimizer.extract_variables(&expr);
+        assert_eq!(vars.len(), 1);
+        assert!(vars.contains("n"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_list_comprehension() {
+        let optimizer = Optimizer::new();
+        let expr = LogicalExpression::ListComprehension {
+            variable: "x".to_string(),
+            list_expr: Box::new(LogicalExpression::Variable("items".to_string())),
+            filter_expr: Some(Box::new(LogicalExpression::Variable("pred".to_string()))),
+            map_expr: Box::new(LogicalExpression::Variable("result".to_string())),
+        };
+        let vars = optimizer.extract_variables(&expr);
+        assert!(vars.contains("items"));
+        assert!(vars.contains("pred"));
+        assert!(vars.contains("result"));
+    }
+
+    #[test]
+    fn test_extract_variables_from_literal_and_parameter() {
+        let optimizer = Optimizer::new();
+
+        let literal = LogicalExpression::Literal(Value::Int64(42));
+        assert!(optimizer.extract_variables(&literal).is_empty());
+
+        let param = LogicalExpression::Parameter("p".to_string());
+        assert!(optimizer.extract_variables(&param).is_empty());
+    }
+
+    // Recursive filter pushdown tests
+
+    #[test]
+    fn test_recursive_filter_pushdown_through_skip() {
+        let optimizer = Optimizer::new();
+
+        let plan = LogicalPlan::new(LogicalOperator::Return(ReturnOp {
+            items: vec![ReturnItem {
+                expression: LogicalExpression::Variable("n".to_string()),
+                alias: None,
+            }],
+            distinct: false,
+            input: Box::new(LogicalOperator::Filter(FilterOp {
+                predicate: LogicalExpression::Literal(Value::Bool(true)),
+                input: Box::new(LogicalOperator::Skip(SkipOp {
+                    count: 5,
+                    input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                        variable: "n".to_string(),
+                        label: None,
+                        input: None,
+                    })),
+                })),
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+
+        // Verify optimization succeeded
+        assert!(matches!(&optimized.root, LogicalOperator::Return(_)));
+    }
+
+    #[test]
+    fn test_nested_filter_pushdown() {
+        let optimizer = Optimizer::new();
+
+        // Multiple nested filters
+        let plan = LogicalPlan::new(LogicalOperator::Return(ReturnOp {
+            items: vec![ReturnItem {
+                expression: LogicalExpression::Variable("n".to_string()),
+                alias: None,
+            }],
+            distinct: false,
+            input: Box::new(LogicalOperator::Filter(FilterOp {
+                predicate: LogicalExpression::Binary {
+                    left: Box::new(LogicalExpression::Property {
+                        variable: "n".to_string(),
+                        property: "x".to_string(),
+                    }),
+                    op: BinaryOp::Gt,
+                    right: Box::new(LogicalExpression::Literal(Value::Int64(1))),
+                },
+                input: Box::new(LogicalOperator::Filter(FilterOp {
+                    predicate: LogicalExpression::Binary {
+                        left: Box::new(LogicalExpression::Property {
+                            variable: "n".to_string(),
+                            property: "y".to_string(),
+                        }),
+                        op: BinaryOp::Lt,
+                        right: Box::new(LogicalExpression::Literal(Value::Int64(10))),
+                    },
+                    input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
+                        variable: "n".to_string(),
+                        label: None,
+                        input: None,
+                    })),
+                })),
+            })),
+        }));
+
+        let optimized = optimizer.optimize(plan).unwrap();
+        assert!(matches!(&optimized.root, LogicalOperator::Return(_)));
     }
 }

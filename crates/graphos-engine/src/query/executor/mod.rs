@@ -3,7 +3,7 @@
 //! Executes physical plans and produces results.
 
 use crate::database::QueryResult;
-use graphos_common::types::Value;
+use graphos_common::types::{LogicalType, Value};
 use graphos_common::utils::error::{Error, Result};
 use graphos_core::execution::operators::{Operator, OperatorError};
 use graphos_core::execution::DataChunk;
@@ -12,6 +12,8 @@ use graphos_core::execution::DataChunk;
 pub struct Executor {
     /// Column names for the result.
     columns: Vec<String>,
+    /// Column types for the result.
+    column_types: Vec<LogicalType>,
 }
 
 impl Executor {
@@ -20,13 +22,27 @@ impl Executor {
     pub fn new() -> Self {
         Self {
             columns: Vec::new(),
+            column_types: Vec::new(),
         }
     }
 
     /// Creates an executor with specified column names.
     #[must_use]
     pub fn with_columns(columns: Vec<String>) -> Self {
-        Self { columns }
+        let len = columns.len();
+        Self {
+            columns,
+            column_types: vec![LogicalType::Any; len],
+        }
+    }
+
+    /// Creates an executor with specified column names and types.
+    #[must_use]
+    pub fn with_columns_and_types(columns: Vec<String>, column_types: Vec<LogicalType>) -> Self {
+        Self {
+            columns,
+            column_types,
+        }
     }
 
     /// Executes a physical operator and collects all results.
@@ -35,11 +51,17 @@ impl Executor {
     ///
     /// Returns an error if operator execution fails.
     pub fn execute(&self, operator: &mut dyn Operator) -> Result<QueryResult> {
-        let mut result = QueryResult::new(self.columns.clone());
+        let mut result = QueryResult::with_types(self.columns.clone(), self.column_types.clone());
+        let mut types_captured = !result.column_types.iter().all(|t| *t == LogicalType::Any);
 
         loop {
             match operator.next() {
                 Ok(Some(chunk)) => {
+                    // Capture column types from first non-empty chunk
+                    if !types_captured && chunk.column_count() > 0 {
+                        self.capture_column_types(&chunk, &mut result);
+                        types_captured = true;
+                    }
                     self.collect_chunk(&chunk, &mut result)?;
                 }
                 Ok(None) => break,
@@ -60,8 +82,9 @@ impl Executor {
         operator: &mut dyn Operator,
         limit: usize,
     ) -> Result<QueryResult> {
-        let mut result = QueryResult::new(self.columns.clone());
+        let mut result = QueryResult::with_types(self.columns.clone(), self.column_types.clone());
         let mut collected = 0;
+        let mut types_captured = !result.column_types.iter().all(|t| *t == LogicalType::Any);
 
         loop {
             if collected >= limit {
@@ -70,6 +93,11 @@ impl Executor {
 
             match operator.next() {
                 Ok(Some(chunk)) => {
+                    // Capture column types from first non-empty chunk
+                    if !types_captured && chunk.column_count() > 0 {
+                        self.capture_column_types(&chunk, &mut result);
+                        types_captured = true;
+                    }
                     let remaining = limit - collected;
                     collected += self.collect_chunk_limited(&chunk, &mut result, remaining)?;
                 }
@@ -79,6 +107,19 @@ impl Executor {
         }
 
         Ok(result)
+    }
+
+    /// Captures column types from a DataChunk.
+    fn capture_column_types(&self, chunk: &DataChunk, result: &mut QueryResult) {
+        let col_count = chunk.column_count();
+        result.column_types = Vec::with_capacity(col_count);
+        for col_idx in 0..col_count {
+            let col_type = chunk
+                .column(col_idx)
+                .map(|col| col.data_type().clone())
+                .unwrap_or(LogicalType::Any);
+            result.column_types.push(col_type);
+        }
     }
 
     /// Collects all rows from a DataChunk into the result.

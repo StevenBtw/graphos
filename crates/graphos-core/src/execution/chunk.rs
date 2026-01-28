@@ -165,13 +165,30 @@ impl DataChunk {
     /// After this operation, selection is None and count equals the
     /// previously selected row count.
     pub fn flatten(&mut self) {
-        if self.selection.is_none() {
-            return;
+        let selection = match self.selection.take() {
+            Some(sel) => sel,
+            None => return,
+        };
+
+        let selected_count = selection.len();
+
+        // Create new columns with only selected rows, preserving data types
+        let mut new_columns = Vec::with_capacity(self.columns.len());
+
+        for col in &self.columns {
+            // Create new vector with same data type as original
+            let mut new_col = ValueVector::with_type(col.data_type().clone());
+            for idx in selection.iter() {
+                if let Some(val) = col.get(idx) {
+                    new_col.push(val);
+                }
+            }
+            new_columns.push(new_col);
         }
 
-        // FIXME(chunk-flatten): Implement actual flattening by copying selected rows
-        // For now, just clear selection
-        self.selection = None;
+        self.columns = new_columns;
+        self.count = selected_count;
+        self.capacity = selected_count;
     }
 
     /// Returns an iterator over selected row indices.
@@ -471,5 +488,60 @@ mod tests {
 
         let indices: Vec<_> = chunk.selected_indices().collect();
         assert_eq!(indices, vec![1, 3]);
+    }
+
+    #[test]
+    fn test_chunk_flatten() {
+        let schema = [LogicalType::Int64, LogicalType::String];
+        let mut builder = DataChunkBuilder::with_schema(&schema);
+
+        // Add rows: (0, "a"), (1, "b"), (2, "c"), (3, "d"), (4, "e")
+        let letters = ["a", "b", "c", "d", "e"];
+        for i in 0..5 {
+            builder.column_mut(0).unwrap().push_int64(i);
+            builder.column_mut(1).unwrap().push_string(letters[i as usize]);
+            builder.advance_row();
+        }
+
+        let mut chunk = builder.finish();
+
+        // Select only odd rows: (1, "b"), (3, "d")
+        let selection = SelectionVector::from_predicate(5, |i| i % 2 == 1);
+        chunk.set_selection(selection);
+
+        assert_eq!(chunk.row_count(), 2);
+        assert_eq!(chunk.total_row_count(), 5);
+
+        // Flatten should copy selected rows
+        chunk.flatten();
+
+        // After flatten, total_row_count should equal row_count
+        assert_eq!(chunk.row_count(), 2);
+        assert_eq!(chunk.total_row_count(), 2);
+        assert!(chunk.selection().is_none());
+
+        // Verify the data is correct
+        assert_eq!(chunk.column(0).unwrap().get_int64(0), Some(1));
+        assert_eq!(chunk.column(0).unwrap().get_int64(1), Some(3));
+        assert_eq!(chunk.column(1).unwrap().get_string(0), Some("b"));
+        assert_eq!(chunk.column(1).unwrap().get_string(1), Some("d"));
+    }
+
+    #[test]
+    fn test_chunk_flatten_no_selection() {
+        let schema = [LogicalType::Int64];
+        let mut builder = DataChunkBuilder::with_schema(&schema);
+
+        builder.column_mut(0).unwrap().push_int64(42);
+        builder.advance_row();
+
+        let mut chunk = builder.finish();
+        let original_count = chunk.row_count();
+
+        // Flatten with no selection should be a no-op
+        chunk.flatten();
+
+        assert_eq!(chunk.row_count(), original_count);
+        assert_eq!(chunk.column(0).unwrap().get_int64(0), Some(42));
     }
 }

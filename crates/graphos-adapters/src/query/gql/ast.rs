@@ -275,6 +275,8 @@ pub enum Expression {
     Literal(Literal),
     /// A variable reference.
     Variable(String),
+    /// A parameter reference ($name).
+    Parameter(String),
     /// A property access (var.prop).
     PropertyAccess {
         /// The variable.
@@ -315,6 +317,11 @@ pub enum Expression {
         whens: Vec<(Expression, Expression)>,
         /// Else clause.
         else_clause: Option<Box<Expression>>,
+    },
+    /// EXISTS subquery expression - checks if inner query returns results.
+    ExistsSubquery {
+        /// The inner query pattern to check for existence.
+        query: Box<QueryStatement>,
     },
 }
 

@@ -237,7 +237,40 @@ impl Binder {
                 }
                 Ok(())
             }
+            LogicalOperator::SetProperty(set) => {
+                self.bind_operator(&set.input)?;
+                // Validate that the variable to update is defined
+                if !self.context.contains(&set.variable) {
+                    return Err(binding_error(format!(
+                        "Undefined variable '{}' in SET",
+                        set.variable
+                    )));
+                }
+                // Validate property value expressions
+                for (_, expr) in &set.properties {
+                    self.validate_expression(expr)?;
+                }
+                Ok(())
+            }
             LogicalOperator::Empty => Ok(()),
+
+            LogicalOperator::Unwind(unwind) => {
+                // First bind the input
+                self.bind_operator(&unwind.input)?;
+                // Validate the expression being unwound
+                self.validate_expression(&unwind.expression)?;
+                // Add the new variable to the context
+                self.context.add_variable(
+                    unwind.variable.clone(),
+                    VariableInfo {
+                        name: unwind.variable.clone(),
+                        data_type: LogicalType::Any, // Unwound elements can be any type
+                        is_node: false,
+                        is_edge: false,
+                    },
+                );
+                Ok(())
+            }
 
             // RDF/SPARQL operators
             LogicalOperator::TripleScan(scan) => self.bind_triple_scan(scan),
@@ -272,6 +305,55 @@ impl Binder {
                         is_edge: false,
                     },
                 );
+                Ok(())
+            }
+            LogicalOperator::Merge(merge) => {
+                // First bind the input
+                self.bind_operator(&merge.input)?;
+                // Validate the match property expressions
+                for (_, expr) in &merge.match_properties {
+                    self.validate_expression(expr)?;
+                }
+                // Validate the ON CREATE property expressions
+                for (_, expr) in &merge.on_create {
+                    self.validate_expression(expr)?;
+                }
+                // Validate the ON MATCH property expressions
+                for (_, expr) in &merge.on_match {
+                    self.validate_expression(expr)?;
+                }
+                // MERGE introduces a new variable
+                self.context.add_variable(
+                    merge.variable.clone(),
+                    VariableInfo {
+                        name: merge.variable.clone(),
+                        data_type: LogicalType::Node,
+                        is_node: true,
+                        is_edge: false,
+                    },
+                );
+                Ok(())
+            }
+            LogicalOperator::AddLabel(add_label) => {
+                self.bind_operator(&add_label.input)?;
+                // Validate that the variable exists
+                if !self.context.contains(&add_label.variable) {
+                    return Err(binding_error(format!(
+                        "Undefined variable '{}' in SET labels",
+                        add_label.variable
+                    )));
+                }
+                Ok(())
+            }
+            LogicalOperator::RemoveLabel(remove_label) => {
+                self.bind_operator(&remove_label.input)?;
+                // Validate that the variable exists
+                if !self.context.contains(&remove_label.variable) {
+                    return Err(binding_error(format!(
+                        "Undefined variable '{}' in REMOVE labels",
+                        remove_label.variable
+                    )));
+                }
                 Ok(())
             }
         }
@@ -481,6 +563,26 @@ impl Binder {
                 }
                 Ok(())
             }
+            LogicalExpression::Map(pairs) => {
+                for (_, value) in pairs {
+                    self.validate_expression(value)?;
+                }
+                Ok(())
+            }
+            LogicalExpression::IndexAccess { base, index } => {
+                self.validate_expression(base)?;
+                self.validate_expression(index)
+            }
+            LogicalExpression::SliceAccess { base, start, end } => {
+                self.validate_expression(base)?;
+                if let Some(s) = start {
+                    self.validate_expression(s)?;
+                }
+                if let Some(e) = end {
+                    self.validate_expression(e)?;
+                }
+                Ok(())
+            }
             LogicalExpression::Case {
                 operand,
                 when_clauses,
@@ -509,6 +611,30 @@ impl Binder {
                         "Undefined variable '{var}' in function"
                     )));
                 }
+                Ok(())
+            }
+            LogicalExpression::ListComprehension {
+                list_expr,
+                filter_expr,
+                map_expr,
+                ..
+            } => {
+                // Validate the list expression
+                self.validate_expression(list_expr)?;
+                // Note: filter_expr and map_expr use the comprehension variable
+                // which is defined within the comprehension scope, so we don't
+                // need to validate it against the outer context
+                if let Some(filter) = filter_expr {
+                    self.validate_expression(filter)?;
+                }
+                self.validate_expression(map_expr)?;
+                Ok(())
+            }
+            LogicalExpression::ExistsSubquery(subquery)
+            | LogicalExpression::CountSubquery(subquery) => {
+                // Subqueries have their own binding context
+                // For now, just validate the structure exists
+                let _ = subquery; // Would need recursive binding
                 Ok(())
             }
         }

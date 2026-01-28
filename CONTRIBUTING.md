@@ -44,8 +44,12 @@ Query String → Parser → AST → Translator → LogicalPlan → Optimizer →
 |-----------|----------|----------|
 | **Parser** | `graphos-adapters/query/gql/` | `graphos-adapters/query/sparql/` |
 | | `graphos-adapters/query/cypher/` | |
+| | `graphos-adapters/query/gremlin/` | |
+| | `graphos-adapters/query/graphql/` | `graphos-adapters/query/graphql/` |
 | **Translator** | `graphos-engine/query/gql_translator.rs` | `graphos-engine/query/sparql_translator.rs` |
-| | `graphos-engine/query/cypher_translator.rs` | |
+| | `graphos-engine/query/cypher_translator.rs` | `graphos-engine/query/graphql_rdf_translator.rs` |
+| | `graphos-engine/query/gremlin_translator.rs` | |
+| | `graphos-engine/query/graphql_translator.rs` | |
 | **Storage** | `graphos-core/graph/lpg/` | `graphos-core/graph/rdf/` |
 | **Operators** | NodeScan, Expand, CreateNode | TripleScan, LeftJoin, AntiJoin |
 
@@ -53,11 +57,11 @@ Query String → Parser → AST → Translator → LogicalPlan → Optimizer →
 
 | Query Language | LPG | RDF | Notes |
 |----------------|-----|-----|-------|
-| GQL | ✅ | ❌ | Primary language, ISO standard |
-| Cypher | ✅ | ❌ | Feature-gated, openCypher compatible |
-| SPARQL | ❌ | 🚧 | Parser ready, RDF store exists, integration planned |
-| Gremlin | 🚧 | ❌ | Planned - imperative traversal language |
-| GraphQL | 🚧 | 🚧 | Planned - schema-driven, maps to both models |
+| GQL | ✅ | — | Primary language, ISO standard |
+| Cypher | ✅ | — | Feature-gated, openCypher compatible |
+| Gremlin | ✅ | — | Feature-gated, Apache TinkerPop traversal language |
+| GraphQL | ✅ | ✅ | Feature-gated, schema-driven, maps to both models |
+| SPARQL | — | ✅ | Feature-gated, W3C standard for RDF queries |
 
 ### Implementation Plan
 

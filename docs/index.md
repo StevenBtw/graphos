@@ -53,11 +53,11 @@ hide:
 
     First-class Python support via PyO3. Use Graphos from Python with a Pythonic API that feels natural.
 
--   :material-database-search:{ .lg .middle } **GQL Query Language**
+-   :material-database-search:{ .lg .middle } **Multi-Language Queries**
 
     ---
 
-    Uses GQL (ISO/IEC 39075), the international standard for graph query languages. Familiar syntax for graph database users.
+    GQL, Cypher, Gremlin, GraphQL, and SPARQL. Choose the query language that fits your needs and expertise.
 
 -   :material-shield-check:{ .lg .middle } **ACID Transactions**
 
@@ -149,29 +149,80 @@ hide:
 
 ## Features
 
-### Data Model
+### Dual Data Model Support
 
-Graphos implements the **Labeled Property Graph (LPG)** model:
+Graphos supports both major graph data models with optimized storage for each:
 
-- **Nodes** with labels and properties
-- **Edges** with types and properties
-- **Properties** supporting rich data types (integers, floats, strings, lists, maps)
+=== "LPG (Labeled Property Graph)"
 
-### Query Language
+    - **Nodes** with labels and properties
+    - **Edges** with types and properties
+    - **Properties** supporting rich data types
+    - Ideal for social networks, knowledge graphs, application data
 
-GQL (Graph Query Language) is the ISO standard for querying property graphs:
+=== "RDF (Resource Description Framework)"
 
-```sql
--- Find friends of friends
-MATCH (me:Person {name: 'Alice'})-[:KNOWS]->(friend)-[:KNOWS]->(fof)
-WHERE fof <> me
-RETURN DISTINCT fof.name
+    - **Triples**: subject-predicate-object statements
+    - **SPO/POS/OSP indexes** for efficient querying
+    - W3C standard compliance
+    - Ideal for semantic web, linked data, ontologies
 
--- Shortest path
-MATCH path = shortestPath((a:Person)-[:KNOWS*]-(b:Person))
-WHERE a.name = 'Alice' AND b.name = 'Charlie'
-RETURN path
-```
+### Query Languages
+
+Choose the query language that fits your needs:
+
+| Language | Data Model | Style |
+|----------|------------|-------|
+| **GQL** (default) | LPG | ISO standard, declarative pattern matching |
+| **Cypher** | LPG | Neo4j-compatible, ASCII-art patterns |
+| **Gremlin** | LPG | Apache TinkerPop, traversal-based |
+| **GraphQL** | LPG, RDF | Schema-driven, familiar to web developers |
+| **SPARQL** | RDF | W3C standard for RDF queries |
+
+=== "GQL"
+
+    ```sql
+    MATCH (me:Person {name: 'Alice'})-[:KNOWS]->(friend)-[:KNOWS]->(fof)
+    WHERE fof <> me
+    RETURN DISTINCT fof.name
+    ```
+
+=== "Cypher"
+
+    ```cypher
+    MATCH (me:Person {name: 'Alice'})-[:KNOWS]->(friend)-[:KNOWS]->(fof)
+    WHERE fof <> me
+    RETURN DISTINCT fof.name
+    ```
+
+=== "Gremlin"
+
+    ```gremlin
+    g.V().has('name', 'Alice').out('KNOWS').out('KNOWS').
+      where(neq('me')).values('name').dedup()
+    ```
+
+=== "GraphQL"
+
+    ```graphql
+    {
+      Person(name: "Alice") {
+        friends { friends { name } }
+      }
+    }
+    ```
+
+=== "SPARQL"
+
+    ```sparql
+    SELECT DISTINCT ?fofName WHERE {
+      ?me foaf:name "Alice" .
+      ?me foaf:knows ?friend .
+      ?friend foaf:knows ?fof .
+      ?fof foaf:name ?fofName .
+      FILTER(?fof != ?me)
+    }
+    ```
 
 ### Architecture Highlights
 
@@ -188,11 +239,7 @@ RETURN path
 === "Python"
 
     ```bash
-    # Using uv (recommended)
     uv add pygraphos
-
-    # Using pip
-    pip install pygraphos
     ```
 
 === "Rust"

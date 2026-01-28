@@ -40,7 +40,7 @@ cargo test --workspace
 
 ```bash
 cd crates/graphos-python
-pip install maturin
+uv add maturin
 maturin develop
 ```
 
