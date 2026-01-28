@@ -27,7 +27,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist -m crates/graphos-python/Cargo.toml
+          args: --release --out dist --find-interpreter -m crates/graphos-python/Cargo.toml
           sccache: "true"
           manylinux: auto
           rust-toolchain: stable
@@ -55,7 +55,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist -m crates/graphos-python/Cargo.toml
+          args: --release --out dist --find-interpreter -m crates/graphos-python/Cargo.toml
           sccache: "true"
           manylinux: musllinux_1_2
           rust-toolchain: stable

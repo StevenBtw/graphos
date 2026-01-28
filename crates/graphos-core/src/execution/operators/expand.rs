@@ -171,15 +171,13 @@ impl Operator for ExpandOperator {
 
         // Build output schema: preserve all input columns + edge + target
         // We need to build this dynamically based on input schema
-        let input_chunk = if self.current_input.is_none() {
+        if self.current_input.is_none() {
             if !self.load_next_input()? {
                 return Ok(None);
             }
             self.load_edges_for_current_row()?;
-            self.current_input.as_ref().unwrap()
-        } else {
-            self.current_input.as_ref().unwrap()
-        };
+        }
+        let input_chunk = self.current_input.as_ref().expect("input loaded above");
 
         // Build schema: [input_columns..., edge, target]
         let input_col_count = input_chunk.column_count();
