@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A high-performance, embeddable graph database with Python bindings"
 readme = "README.md"
 license = { text = "Apache-2.0" }
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 authors = [
     { name = "Graphos Contributors" }
 ]
@@ -20,10 +20,9 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Topic :: Database",
     "Topic :: Database :: Database Engines/Servers",
@@ -56,11 +55,11 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 strict = true
