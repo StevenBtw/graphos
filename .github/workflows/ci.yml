@@ -162,7 +162,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run benchmarks
-        run: cargo bench --all-features -- --noplot
+        run: cargo bench --all-features --bench arena_bench --bench index_bench -- --noplot
 
   # Security audit
   security:
