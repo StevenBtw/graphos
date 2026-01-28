@@ -82,8 +82,7 @@ plugins:
   - git-revision-date-localized:
       enable_creation_date: true
       type: timeago
-  - tags:
-      tags_file: tags.md
+  - tags
 
 # Extensions
 markdown_extensions:

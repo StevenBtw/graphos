@@ -250,7 +250,9 @@ impl PyNetworkXAdapter {
 
             // Try to get labels from node data
             let labels: Vec<String> = if let Ok(labels_attr) = node_data.get_item("labels") {
-                labels_attr.extract().unwrap_or_else(|_| vec!["Node".to_string()])
+                labels_attr
+                    .extract()
+                    .unwrap_or_else(|_| vec!["Node".to_string()])
             } else {
                 vec!["Node".to_string()]
             };
@@ -444,8 +446,11 @@ impl PyNetworkXAdapter {
             }
         } else {
             let result = algorithms::dijkstra(store, NodeId::new(source), weight);
-            let distances: HashMap<u64, f64> =
-                result.distances.into_iter().map(|(n, d)| (n.0, d)).collect();
+            let distances: HashMap<u64, f64> = result
+                .distances
+                .into_iter()
+                .map(|(n, d)| (n.0, d))
+                .collect();
             Ok(distances.into_pyobject(py)?.into_any().unbind())
         }
     }

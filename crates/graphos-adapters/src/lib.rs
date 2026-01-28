@@ -9,10 +9,6 @@
 //! - [`query`] - Query language parsers (GQL, Cypher)
 //! - [`plugins`] - Plugin system and bridges
 
-#![warn(missing_docs)]
-#![warn(clippy::all)]
-#![warn(clippy::pedantic)]
-
 pub mod plugins;
 pub mod query;
 pub mod storage;

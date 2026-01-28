@@ -192,7 +192,8 @@ impl AsyncWalManager {
     /// Returns an error if the checkpoint cannot be written.
     pub async fn checkpoint(&self, current_tx: TxId, epoch: EpochId) -> Result<()> {
         // Write checkpoint record
-        self.log(&WalRecord::Checkpoint { tx_id: current_tx }).await?;
+        self.log(&WalRecord::Checkpoint { tx_id: current_tx })
+            .await?;
 
         // Force sync on checkpoint
         self.sync().await?;
@@ -510,9 +511,11 @@ mod tests {
         let wal = AsyncWalManager::with_config(dir.path().join("sync"), config)
             .await
             .unwrap();
-        wal.log(&WalRecord::TxCommit { tx_id: TxId::new(1) })
-            .await
-            .unwrap();
+        wal.log(&WalRecord::TxCommit {
+            tx_id: TxId::new(1),
+        })
+        .await
+        .unwrap();
 
         // Test NoSync mode
         let config = WalConfig {
@@ -564,9 +567,11 @@ mod tests {
         .await
         .unwrap();
 
-        wal.log(&WalRecord::TxCommit { tx_id: TxId::new(1) })
-            .await
-            .unwrap();
+        wal.log(&WalRecord::TxCommit {
+            tx_id: TxId::new(1),
+        })
+        .await
+        .unwrap();
 
         // Create checkpoint
         wal.checkpoint(TxId::new(1), EpochId::new(10))

@@ -12,10 +12,6 @@
 //! - [`mvcc`] - MVCC primitives (VersionChain, VersionInfo)
 //! - [`utils`] - Utility functions and helpers (hashing, errors)
 
-#![warn(missing_docs)]
-#![warn(clippy::all)]
-#![warn(clippy::pedantic)]
-
 pub mod memory;
 pub mod mvcc;
 pub mod types;

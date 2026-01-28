@@ -9,11 +9,11 @@ use std::sync::OnceLock;
 use graphos_common::types::{NodeId, Value};
 use graphos_common::utils::error::Result;
 use graphos_common::utils::hash::FxHashMap;
-use graphos_core::graph::lpg::LpgStore;
 use graphos_core::graph::Direction;
+use graphos_core::graph::lpg::LpgStore;
 
-use super::traits::{GraphAlgorithm, NodeValueResultBuilder};
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
+use super::traits::{GraphAlgorithm, NodeValueResultBuilder};
 
 // ============================================================================
 // Degree Centrality
@@ -598,7 +598,8 @@ impl GraphAlgorithm for DegreeCentralityAlgorithm {
         if normalized {
             let scores = degree_centrality_normalized(store);
 
-            let mut builder = NodeValueResultBuilder::with_capacity("degree_centrality", scores.len());
+            let mut builder =
+                NodeValueResultBuilder::with_capacity("degree_centrality", scores.len());
             for (node, score) in scores {
                 builder.push(node, Value::Float64(score));
             }

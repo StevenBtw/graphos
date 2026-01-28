@@ -131,8 +131,7 @@ impl<V: Clone + Send + Sync + 'static> PartitionedState<V> {
         // If partition is in memory, return it
         if self.partitions[partition_idx].is_some() {
             // Invariant: just checked is_some() above
-            return Ok(self
-                .partitions[partition_idx]
+            return Ok(self.partitions[partition_idx]
                 .as_mut()
                 .expect("partition is Some: checked on previous line"));
         }

@@ -286,11 +286,7 @@ impl CardinalityEstimator {
             LogicalExpression::Literal(value) => {
                 // Boolean literal
                 if let graphos_common::types::Value::Bool(b) = value {
-                    if *b {
-                        1.0
-                    } else {
-                        0.0
-                    }
+                    if *b { 1.0 } else { 0.0 }
                 } else {
                     self.default_selectivity
                 }

@@ -22,9 +22,7 @@ pub use cardinality::{CardinalityEstimator, ColumnStats, TableStats};
 pub use cost::{Cost, CostModel};
 pub use join_order::{BitSet, DPccp, JoinGraph, JoinGraphBuilder, JoinPlan};
 
-use crate::query::plan::{
-    FilterOp, LogicalExpression, LogicalOperator, LogicalPlan,
-};
+use crate::query::plan::{FilterOp, LogicalExpression, LogicalOperator, LogicalPlan};
 use graphos_common::utils::error::Result;
 use std::collections::HashSet;
 
@@ -184,8 +182,7 @@ impl Optimizer {
 
                 // If predicate doesn't use any computed columns, push through
                 if predicate_vars.is_disjoint(&computed_vars) {
-                    proj.input =
-                        Box::new(self.try_push_filter_into(predicate, *proj.input));
+                    proj.input = Box::new(self.try_push_filter_into(predicate, *proj.input));
                     LogicalOperator::Project(proj)
                 } else {
                     // Can't push through, keep filter on top
@@ -207,13 +204,11 @@ impl Optimizer {
                 let predicate_vars = self.extract_variables(&predicate);
 
                 // Check if predicate only uses the source variable
-                let uses_only_source =
-                    predicate_vars.iter().all(|v| v == &expand.from_variable);
+                let uses_only_source = predicate_vars.iter().all(|v| v == &expand.from_variable);
 
                 if uses_only_source {
                     // Push the filter before the expand
-                    expand.input =
-                        Box::new(self.try_push_filter_into(predicate, *expand.input));
+                    expand.input = Box::new(self.try_push_filter_into(predicate, *expand.input));
                     LogicalOperator::Expand(expand)
                 } else {
                     // Keep filter after expand
@@ -433,10 +428,7 @@ impl Optimizer {
         &self,
         projections: &[crate::query::plan::Projection],
     ) -> HashSet<String> {
-        projections
-            .iter()
-            .filter_map(|p| p.alias.clone())
-            .collect()
+        projections.iter().filter_map(|p| p.alias.clone()).collect()
     }
 }
 
@@ -680,14 +672,24 @@ mod tests {
     #[test]
     fn test_optimizer_with_join_reorder_disabled() {
         let optimizer = Optimizer::new().with_join_reorder(false);
-        assert!(optimizer.optimize(LogicalPlan::new(LogicalOperator::Empty)).is_ok());
+        assert!(
+            optimizer
+                .optimize(LogicalPlan::new(LogicalOperator::Empty))
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_optimizer_with_cost_model() {
         let cost_model = CostModel::new();
         let optimizer = Optimizer::new().with_cost_model(cost_model);
-        assert!(optimizer.cost_model().estimate(&LogicalOperator::Empty, 0.0).total() < 0.001);
+        assert!(
+            optimizer
+                .cost_model()
+                .estimate(&LogicalOperator::Empty, 0.0)
+                .total()
+                < 0.001
+        );
     }
 
     #[test]
@@ -1100,8 +1102,14 @@ mod tests {
     fn test_extract_variables_from_map() {
         let optimizer = Optimizer::new();
         let expr = LogicalExpression::Map(vec![
-            ("key1".to_string(), LogicalExpression::Variable("a".to_string())),
-            ("key2".to_string(), LogicalExpression::Variable("b".to_string())),
+            (
+                "key1".to_string(),
+                LogicalExpression::Variable("a".to_string()),
+            ),
+            (
+                "key2".to_string(),
+                LogicalExpression::Variable("b".to_string()),
+            ),
         ]);
         let vars = optimizer.extract_variables(&expr);
         assert_eq!(vars.len(), 2);

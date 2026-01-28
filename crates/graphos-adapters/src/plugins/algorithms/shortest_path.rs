@@ -9,11 +9,11 @@ use std::sync::OnceLock;
 use graphos_common::types::{NodeId, Value};
 use graphos_common::utils::error::{Error, Result};
 use graphos_common::utils::hash::FxHashMap;
-use graphos_core::graph::lpg::LpgStore;
 use graphos_core::graph::Direction;
+use graphos_core::graph::lpg::LpgStore;
 
-use super::traits::{GraphAlgorithm, MinScored};
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
+use super::traits::{GraphAlgorithm, MinScored};
 
 // ============================================================================
 // Edge Weight Extraction
@@ -22,7 +22,11 @@ use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
 /// Extracts edge weight from a property value.
 ///
 /// Supports Int64 and Float64 values, defaulting to 1.0 if no weight property.
-fn extract_weight(store: &LpgStore, edge_id: graphos_common::types::EdgeId, weight_prop: Option<&str>) -> f64 {
+fn extract_weight(
+    store: &LpgStore,
+    edge_id: graphos_common::types::EdgeId,
+    weight_prop: Option<&str>,
+) -> f64 {
     if let Some(prop_name) = weight_prop {
         if let Some(edge) = store.get_edge(edge_id) {
             if let Some(value) = edge.get_property(prop_name) {
@@ -100,7 +104,10 @@ pub fn dijkstra(store: &LpgStore, source: NodeId, weight_property: Option<&str>)
 
     // Check if source exists
     if store.get_node(source).is_none() {
-        return DijkstraResult { distances, predecessors };
+        return DijkstraResult {
+            distances,
+            predecessors,
+        };
     }
 
     distances.insert(source, 0.0);
@@ -131,7 +138,10 @@ pub fn dijkstra(store: &LpgStore, source: NodeId, weight_property: Option<&str>)
         }
     }
 
-    DijkstraResult { distances, predecessors }
+    DijkstraResult {
+        distances,
+        predecessors,
+    }
 }
 
 /// Runs Dijkstra's algorithm to find shortest path to a specific target.
@@ -653,16 +663,11 @@ impl GraphAlgorithm for DijkstraAlgorithm {
             // Single-source shortest paths
             let dijkstra_result = dijkstra(store, source, weight_prop.as_deref());
 
-            let mut result = AlgorithmResult::new(vec![
-                "node_id".to_string(),
-                "distance".to_string(),
-            ]);
+            let mut result =
+                AlgorithmResult::new(vec!["node_id".to_string(), "distance".to_string()]);
 
             for (node, distance) in dijkstra_result.distances {
-                result.add_row(vec![
-                    Value::Int64(node.0 as i64),
-                    Value::Float64(distance),
-                ]);
+                result.add_row(vec![Value::Int64(node.0 as i64), Value::Float64(distance)]);
             }
 
             Ok(result)
@@ -923,7 +928,13 @@ mod tests {
         // Simple heuristic: always return 0 (degenerates to Dijkstra)
         let heuristic = |_: NodeId| 0.0;
 
-        let result = astar(&store, NodeId::new(0), NodeId::new(4), Some("weight"), heuristic);
+        let result = astar(
+            &store,
+            NodeId::new(0),
+            NodeId::new(4),
+            Some("weight"),
+            heuristic,
+        );
         assert!(result.is_some());
 
         let (distance, path) = result.unwrap();

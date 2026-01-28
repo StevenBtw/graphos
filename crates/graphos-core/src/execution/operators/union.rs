@@ -76,8 +76,8 @@ pub type UnionAllOperator = UnionOperator;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::chunk::DataChunkBuilder;
     use crate::execution::DataChunk;
+    use crate::execution::chunk::DataChunkBuilder;
 
     /// Mock operator for testing.
     struct MockOperator {
@@ -97,8 +97,7 @@ mod tests {
     impl Operator for MockOperator {
         fn next(&mut self) -> OperatorResult {
             if self.position < self.chunks.len() {
-                let chunk =
-                    std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
+                let chunk = std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
                 self.position += 1;
                 Ok(Some(chunk))
             } else {

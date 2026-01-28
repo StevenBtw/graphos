@@ -5,11 +5,12 @@
 use crate::query::plan::{
     AddLabelOp, AggregateFunction as LogicalAggregateFunction, AggregateOp, AntiJoinOp, BinaryOp,
     CreateEdgeOp, CreateNodeOp, DeleteEdgeOp, DeleteNodeOp, DistinctOp, ExpandDirection, ExpandOp,
-    FilterOp, JoinOp, JoinType, LeftJoinOp, LimitOp, LogicalExpression, LogicalOperator, LogicalPlan,
-    MergeOp, NodeScanOp, RemoveLabelOp, ReturnOp, SetPropertyOp, SkipOp, SortOp, SortOrder, UnaryOp,
-    UnionOp, UnwindOp,
+    FilterOp, JoinOp, JoinType, LeftJoinOp, LimitOp, LogicalExpression, LogicalOperator,
+    LogicalPlan, MergeOp, NodeScanOp, RemoveLabelOp, ReturnOp, SetPropertyOp, SkipOp, SortOp,
+    SortOrder, UnaryOp, UnionOp, UnwindOp,
 };
 use graphos_common::types::LogicalType;
+use graphos_common::types::{EpochId, TxId};
 use graphos_common::utils::error::{Error, Result};
 use graphos_core::execution::operators::{
     AddLabelOperator, AggregateExpr as PhysicalAggregateExpr,
@@ -21,8 +22,7 @@ use graphos_core::execution::operators::{
     SimpleAggregateOperator, SkipOperator, SortDirection, SortKey as PhysicalSortKey, SortOperator,
     UnaryFilterOp, UnionOperator, UnwindOperator,
 };
-use graphos_common::types::{EpochId, TxId};
-use graphos_core::graph::{lpg::LpgStore, Direction};
+use graphos_core::graph::{Direction, lpg::LpgStore};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -244,9 +244,10 @@ impl Planner {
             .collect();
 
         // Check if we need a project operator (for property access or expression evaluation)
-        let needs_project = ret.items.iter().any(|item| {
-            !matches!(&item.expression, LogicalExpression::Variable(_))
-        });
+        let needs_project = ret
+            .items
+            .iter()
+            .any(|item| !matches!(&item.expression, LogicalExpression::Variable(_)));
 
         if needs_project {
             // Build project expressions
@@ -313,9 +314,10 @@ impl Planner {
 
             // Only add ProjectOperator if reordering is needed
             if projections.len() == input_columns.len()
-                && projections.iter().enumerate().all(|(i, p)| {
-                    matches!(p, ProjectExpr::Column(c) if *c == i)
-                })
+                && projections
+                    .iter()
+                    .enumerate()
+                    .all(|(i, p)| matches!(p, ProjectExpr::Column(c) if *c == i))
             {
                 // No reordering needed
                 Ok((input_op, columns))
@@ -342,11 +344,8 @@ impl Planner {
         let filter_expr = self.convert_expression(&filter.predicate)?;
 
         // Create the predicate
-        let predicate = ExpressionPredicate::new(
-            filter_expr,
-            variable_columns,
-            Arc::clone(&self.store),
-        );
+        let predicate =
+            ExpressionPredicate::new(filter_expr, variable_columns, Arc::clone(&self.store));
 
         // Create the filter operator
         let operator = Box::new(FilterOperator::new(input_op, Box::new(predicate)));
@@ -453,7 +452,11 @@ impl Planner {
             if let LogicalExpression::Property { variable, property } = expr {
                 let col_name = format!("{}_{}", variable, property);
                 if !variable_columns.contains_key(&col_name) {
-                    property_projections.push((variable.clone(), property.clone(), col_name.clone()));
+                    property_projections.push((
+                        variable.clone(),
+                        property.clone(),
+                        col_name.clone(),
+                    ));
                     variable_columns.insert(col_name, next_col_idx);
                     next_col_idx += 1;
                 }
@@ -465,7 +468,11 @@ impl Planner {
             if let Some(LogicalExpression::Property { variable, property }) = &agg_expr.expression {
                 let col_name = format!("{}_{}", variable, property);
                 if !variable_columns.contains_key(&col_name) {
-                    property_projections.push((variable.clone(), property.clone(), col_name.clone()));
+                    property_projections.push((
+                        variable.clone(),
+                        property.clone(),
+                        col_name.clone(),
+                    ));
                     variable_columns.insert(col_name, next_col_idx);
                     next_col_idx += 1;
                 }
@@ -486,7 +493,10 @@ impl Planner {
             // Then add property access projections
             for (variable, property, _col_name) in &property_projections {
                 let source_col = *variable_columns.get(variable).ok_or_else(|| {
-                    Error::Internal(format!("Variable '{}' not found for property projection", variable))
+                    Error::Internal(format!(
+                        "Variable '{}' not found for property projection",
+                        variable
+                    ))
                 })?;
                 projections.push(ProjectExpr::PropertyAccess {
                     column: source_col,
@@ -518,7 +528,9 @@ impl Planner {
                 let column = agg_expr
                     .expression
                     .as_ref()
-                    .map(|e| self.resolve_expression_to_column_with_properties(e, &variable_columns))
+                    .map(|e| {
+                        self.resolve_expression_to_column_with_properties(e, &variable_columns)
+                    })
                     .transpose()?;
 
                 Ok(PhysicalAggregateExpr {
@@ -559,9 +571,12 @@ impl Planner {
                 LogicalAggregateFunction::Collect => LogicalType::String, // List type
             };
             output_schema.push(result_type);
-            output_columns.push(agg_expr.alias.clone().unwrap_or_else(|| {
-                format!("{:?}(...)", agg_expr.function).to_lowercase()
-            }));
+            output_columns.push(
+                agg_expr
+                    .alias
+                    .clone()
+                    .unwrap_or_else(|| format!("{:?}(...)", agg_expr.function).to_lowercase()),
+            );
         }
 
         // Choose operator based on whether there are group-by columns
@@ -622,15 +637,12 @@ impl Planner {
             LogicalExpression::Property { variable, property } => {
                 // Look up the projected property column (e.g., "p_price" for p.price)
                 let col_name = format!("{}_{}", variable, property);
-                variable_columns
-                    .get(&col_name)
-                    .copied()
-                    .ok_or_else(|| {
-                        Error::Internal(format!(
-                            "Property column '{}' not found (from {}.{})",
-                            col_name, variable, property
-                        ))
-                    })
+                variable_columns.get(&col_name).copied().ok_or_else(|| {
+                    Error::Internal(format!(
+                        "Property column '{}' not found (from {}.{})",
+                        col_name, variable, property
+                    ))
+                })
             }
             _ => Err(Error::Internal(format!(
                 "Cannot resolve expression to column: {:?}",
@@ -644,12 +656,10 @@ impl Planner {
         match expr {
             LogicalExpression::Literal(v) => Ok(FilterExpression::Literal(v.clone())),
             LogicalExpression::Variable(name) => Ok(FilterExpression::Variable(name.clone())),
-            LogicalExpression::Property { variable, property } => {
-                Ok(FilterExpression::Property {
-                    variable: variable.clone(),
-                    property: property.clone(),
-                })
-            }
+            LogicalExpression::Property { variable, property } => Ok(FilterExpression::Property {
+                variable: variable.clone(),
+                property: property.clone(),
+            }),
             LogicalExpression::Binary { left, op, right } => {
                 let left_expr = self.convert_expression(left)?;
                 let right_expr = self.convert_expression(right)?;
@@ -678,7 +688,11 @@ impl Planner {
                     args: filter_args,
                 })
             }
-            LogicalExpression::Case { operand, when_clauses, else_clause } => {
+            LogicalExpression::Case {
+                operand,
+                when_clauses,
+                else_clause,
+            } => {
                 let filter_operand = operand
                     .as_ref()
                     .map(|e| self.convert_expression(e))
@@ -687,7 +701,10 @@ impl Planner {
                 let filter_when_clauses: Vec<(FilterExpression, FilterExpression)> = when_clauses
                     .iter()
                     .map(|(cond, result)| {
-                        Ok((self.convert_expression(cond)?, self.convert_expression(result)?))
+                        Ok((
+                            self.convert_expression(cond)?,
+                            self.convert_expression(result)?,
+                        ))
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let filter_else = else_clause
@@ -770,7 +787,8 @@ impl Planner {
             LogicalExpression::ExistsSubquery(subplan) => {
                 // Extract the pattern from the subplan
                 // For EXISTS { MATCH (n)-[:TYPE]->() }, we extract start_var, direction, edge_type
-                let (start_var, direction, edge_type, end_labels) = self.extract_exists_pattern(subplan)?;
+                let (start_var, direction, edge_type, end_labels) =
+                    self.extract_exists_pattern(subplan)?;
 
                 Ok(FilterExpression::ExistsSubquery {
                     start_var,
@@ -781,9 +799,9 @@ impl Planner {
                     max_hops: None,
                 })
             }
-            LogicalExpression::CountSubquery(_) => {
-                Err(Error::Internal("COUNT subqueries not yet supported".to_string()))
-            }
+            LogicalExpression::CountSubquery(_) => Err(Error::Internal(
+                "COUNT subqueries not yet supported".to_string(),
+            )),
         }
     }
 
@@ -818,9 +836,7 @@ impl Planner {
                     ))
                 }
             }
-            LogicalOperator::Filter(filter) => {
-                self.extract_exists_pattern(&filter.input)
-            }
+            LogicalOperator::Filter(filter) => self.extract_exists_pattern(&filter.input),
             _ => Err(Error::Internal(
                 "Unsupported EXISTS subquery pattern".to_string(),
             )),
@@ -866,7 +882,9 @@ impl Planner {
                 .filter_map(|cond| {
                     // Try to extract column indices from expressions
                     let left_idx = self.expression_to_column(&cond.left, &left_columns).ok()?;
-                    let right_idx = self.expression_to_column(&cond.right, &right_columns).ok()?;
+                    let right_idx = self
+                        .expression_to_column(&cond.right, &right_columns)
+                        .ok()?;
                     Some((left_idx, right_idx))
                 })
                 .unzip()
@@ -887,26 +905,24 @@ impl Planner {
     }
 
     /// Extracts a column index from an expression.
-    fn expression_to_column(
-        &self,
-        expr: &LogicalExpression,
-        columns: &[String],
-    ) -> Result<usize> {
+    fn expression_to_column(&self, expr: &LogicalExpression, columns: &[String]) -> Result<usize> {
         match expr {
-            LogicalExpression::Variable(name) => {
-                columns
-                    .iter()
-                    .position(|c| c == name)
-                    .ok_or_else(|| Error::Internal(format!("Variable '{}' not found", name)))
-            }
-            _ => Err(Error::Internal("Only variables supported in join conditions".to_string())),
+            LogicalExpression::Variable(name) => columns
+                .iter()
+                .position(|c| c == name)
+                .ok_or_else(|| Error::Internal(format!("Variable '{}' not found", name))),
+            _ => Err(Error::Internal(
+                "Only variables supported in join conditions".to_string(),
+            )),
         }
     }
 
     /// Plans a UNION operator.
     fn plan_union(&self, union: &UnionOp) -> Result<(Box<dyn Operator>, Vec<String>)> {
         if union.inputs.is_empty() {
-            return Err(Error::Internal("Union requires at least one input".to_string()));
+            return Err(Error::Internal(
+                "Union requires at least one input".to_string(),
+            ));
         }
 
         let mut inputs = Vec::with_capacity(union.inputs.len());
@@ -1050,7 +1066,10 @@ impl Planner {
             .iter()
             .position(|c| c == &delete.variable)
             .ok_or_else(|| {
-                Error::Internal(format!("Variable '{}' not found for delete", delete.variable))
+                Error::Internal(format!(
+                    "Variable '{}' not found for delete",
+                    delete.variable
+                ))
             })?;
 
         // Output schema for delete count
@@ -1079,7 +1098,10 @@ impl Planner {
             .iter()
             .position(|c| c == &delete.variable)
             .ok_or_else(|| {
-                Error::Internal(format!("Variable '{}' not found for delete", delete.variable))
+                Error::Internal(format!(
+                    "Variable '{}' not found for delete",
+                    delete.variable
+                ))
             })?;
 
         // Output schema for delete count
@@ -1177,9 +1199,7 @@ impl Planner {
 
         // Find if the expression references an existing column (like a list property)
         let list_col_idx = match &unwind.expression {
-            LogicalExpression::Variable(var) => {
-                input_columns.iter().position(|c| c == var)
-            }
+            LogicalExpression::Variable(var) => input_columns.iter().position(|c| c == var),
             LogicalExpression::Property { variable, .. } => {
                 // Property access needs to be evaluated - for now we'll need the filter predicate
                 // to evaluate this. For simple cases, we treat it as a list column.
@@ -1432,12 +1452,10 @@ pub fn convert_binary_op(op: BinaryOp) -> Result<BinaryFilterOp> {
         BinaryOp::In => Ok(BinaryFilterOp::In),
         BinaryOp::Regex => Ok(BinaryFilterOp::Regex),
         BinaryOp::Pow => Ok(BinaryFilterOp::Pow),
-        BinaryOp::Concat | BinaryOp::Like => {
-            Err(Error::Internal(format!(
-                "Binary operator {:?} not yet supported in filters",
-                op
-            )))
-        }
+        BinaryOp::Concat | BinaryOp::Like => Err(Error::Internal(format!(
+            "Binary operator {:?} not yet supported in filters",
+            op
+        ))),
     }
 }
 
@@ -1502,7 +1520,11 @@ pub fn convert_filter_expression(expr: &LogicalExpression) -> Result<FilterExpre
                 args: filter_args,
             })
         }
-        LogicalExpression::Case { operand, when_clauses, else_clause } => {
+        LogicalExpression::Case {
+            operand,
+            when_clauses,
+            else_clause,
+        } => {
             let filter_operand = operand
                 .as_ref()
                 .map(|e| convert_filter_expression(e))
@@ -1511,7 +1533,10 @@ pub fn convert_filter_expression(expr: &LogicalExpression) -> Result<FilterExpre
             let filter_when_clauses: Vec<(FilterExpression, FilterExpression)> = when_clauses
                 .iter()
                 .map(|(cond, result)| {
-                    Ok((convert_filter_expression(cond)?, convert_filter_expression(result)?))
+                    Ok((
+                        convert_filter_expression(cond)?,
+                        convert_filter_expression(result)?,
+                    ))
                 })
                 .collect::<Result<Vec<_>>>()?;
             let filter_else = else_clause
@@ -1591,11 +1616,9 @@ pub fn convert_filter_expression(expr: &LogicalExpression) -> Result<FilterExpre
                 map_expr: Box::new(map),
             })
         }
-        LogicalExpression::ExistsSubquery(_) | LogicalExpression::CountSubquery(_) => {
-            Err(Error::Internal(
-                "Subqueries not yet supported in filters".to_string(),
-            ))
-        }
+        LogicalExpression::ExistsSubquery(_) | LogicalExpression::CountSubquery(_) => Err(
+            Error::Internal("Subqueries not yet supported in filters".to_string()),
+        ),
     }
 }
 

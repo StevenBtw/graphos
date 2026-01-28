@@ -130,7 +130,13 @@ fn create_numeric_data() -> GraphosDB {
 
     // Create products with prices
     let prices = [100, 200, 150, 300, 250];
-    let categories = ["Electronics", "Electronics", "Clothing", "Electronics", "Clothing"];
+    let categories = [
+        "Electronics",
+        "Electronics",
+        "Clothing",
+        "Electronics",
+        "Clothing",
+    ];
 
     for (price, category) in prices.iter().zip(categories.iter()) {
         session.create_node_with_props(
@@ -208,7 +214,11 @@ mod gql_basic_patterns {
         let session = db.session();
 
         let result = session.execute("MATCH (n) RETURN n").unwrap();
-        assert_eq!(result.row_count(), 5, "Should find 5 nodes (3 people + 2 companies)");
+        assert_eq!(
+            result.row_count(),
+            5,
+            "Should find 5 nodes (3 people + 2 companies)"
+        );
     }
 
     #[test]
@@ -231,7 +241,11 @@ mod gql_basic_patterns {
         let result = session
             .execute("MATCH (n:Person) WHERE n.age > 28 RETURN n.name")
             .unwrap();
-        assert_eq!(result.row_count(), 2, "Should find 2 people older than 28 (Alice: 30, Carol: 35)");
+        assert_eq!(
+            result.row_count(),
+            2,
+            "Should find 2 people older than 28 (Alice: 30, Carol: 35)"
+        );
     }
 
     #[test]
@@ -242,7 +256,11 @@ mod gql_basic_patterns {
         let result = session
             .execute("MATCH (n:Person) WHERE n.name = \"Alice\" RETURN n")
             .unwrap();
-        assert_eq!(result.row_count(), 1, "Should find exactly 1 person named Alice");
+        assert_eq!(
+            result.row_count(),
+            1,
+            "Should find exactly 1 person named Alice"
+        );
     }
 
     #[test]
@@ -281,7 +299,11 @@ mod gql_basic_patterns {
         let session = db.session();
 
         let result = session.execute("MATCH (n:NonExistent) RETURN n").unwrap();
-        assert_eq!(result.row_count(), 0, "Should return empty result for non-existent label");
+        assert_eq!(
+            result.row_count(),
+            0,
+            "Should return empty result for non-existent label"
+        );
     }
 
     #[test]
@@ -293,7 +315,11 @@ mod gql_basic_patterns {
         let result = session
             .execute("MATCH (a:Node)-[:NEXT]->(b:Node) RETURN a.id, b.id")
             .unwrap();
-        assert_eq!(result.row_count(), 3, "Should find 3 NEXT edges in chain A->B->C->D");
+        assert_eq!(
+            result.row_count(),
+            3,
+            "Should find 3 NEXT edges in chain A->B->C->D"
+        );
     }
 
     #[test]
@@ -321,9 +347,7 @@ mod gql_aggregations {
         let db = create_social_network();
         let session = db.session();
 
-        let result = session
-            .execute("MATCH (n:Person) RETURN COUNT(n)")
-            .unwrap();
+        let result = session.execute("MATCH (n:Person) RETURN COUNT(n)").unwrap();
 
         assert_eq!(result.row_count(), 1, "COUNT should return single row");
         if let Value::Int64(count) = &result.rows[0][0] {
@@ -359,7 +383,10 @@ mod gql_aggregations {
         // Sum of [100, 200, 150, 300, 250] = 1000
         match &result.rows[0][0] {
             Value::Int64(sum) => assert_eq!(*sum, 1000, "Sum of all prices should be 1000"),
-            Value::Float64(sum) => assert!((sum - 1000.0).abs() < 0.001, "Sum of all prices should be 1000"),
+            Value::Float64(sum) => assert!(
+                (sum - 1000.0).abs() < 0.001,
+                "Sum of all prices should be 1000"
+            ),
             _ => panic!("Expected numeric result for SUM"),
         }
     }
@@ -424,7 +451,10 @@ mod gql_joins {
             .unwrap();
 
         // Alice knows Bob, Bob knows Carol
-        assert!(result.row_count() >= 1, "Should find at least one 2-hop path");
+        assert!(
+            result.row_count() >= 1,
+            "Should find at least one 2-hop path"
+        );
     }
 
     #[test]
@@ -437,7 +467,10 @@ mod gql_joins {
             .execute("MATCH (a:Person)-[:KNOWS]->(b:Person), (a)-[:WORKS_AT]->(c:Company) RETURN a.name, b.name, c.name")
             .unwrap();
 
-        assert!(result.row_count() >= 3, "Should find at least 3 combined patterns");
+        assert!(
+            result.row_count() >= 3,
+            "Should find at least 3 combined patterns"
+        );
     }
 
     #[test]
@@ -449,7 +482,11 @@ mod gql_joins {
             .execute("MATCH (parent:TreeNode)-[:HAS_CHILD]->(child:TreeNode) RETURN parent.name, child.name")
             .unwrap();
 
-        assert_eq!(result.row_count(), 4, "Should find 4 parent-child relationships");
+        assert_eq!(
+            result.row_count(),
+            4,
+            "Should find 4 parent-child relationships"
+        );
     }
 
     #[test]
@@ -463,7 +500,11 @@ mod gql_joins {
             .execute("MATCH (a:Node)-[:NEXT]->(b:Node)-[:NEXT]->(c:Node)-[:NEXT]->(d:Node) RETURN a.id, d.id")
             .unwrap();
 
-        assert_eq!(result.row_count(), 1, "Should find exactly one full chain path");
+        assert_eq!(
+            result.row_count(),
+            1,
+            "Should find exactly one full chain path"
+        );
     }
 }
 
@@ -480,14 +521,20 @@ mod gql_mutations {
         let db = GraphosDB::new_in_memory();
         let session = db.session();
 
-        session.execute("INSERT (:Person {name: 'Alice', age: 30})").unwrap();
+        session
+            .execute("INSERT (:Person {name: 'Alice', age: 30})")
+            .unwrap();
 
-        let result = session.execute("MATCH (n:Person) RETURN n.name, n.age").unwrap();
+        let result = session
+            .execute("MATCH (n:Person) RETURN n.name, n.age")
+            .unwrap();
         assert_eq!(result.row_count(), 1, "Should have 1 Person node");
         // Note: Property values are stored correctly but order may vary
         // Check name exists
         assert!(
-            result.rows[0].iter().any(|v| *v == Value::String("Alice".into())),
+            result.rows[0]
+                .iter()
+                .any(|v| *v == Value::String("Alice".into())),
             "Should find Alice in result"
         );
     }
@@ -587,9 +634,13 @@ mod cypher_tests {
         let db = GraphosDB::new_in_memory();
         let session = db.session();
 
-        session.execute_cypher("CREATE (:Person {name: 'Alice', age: 30})").unwrap();
+        session
+            .execute_cypher("CREATE (:Person {name: 'Alice', age: 30})")
+            .unwrap();
 
-        let result = session.execute_cypher("MATCH (n:Person) RETURN n.name, n.age").unwrap();
+        let result = session
+            .execute_cypher("MATCH (n:Person) RETURN n.name, n.age")
+            .unwrap();
         assert_eq!(result.row_count(), 1);
     }
 
@@ -602,7 +653,10 @@ mod cypher_tests {
             .execute_cypher("MATCH (a:Person)-[:KNOWS]->(b:Person)-[:KNOWS]->(c:Person) RETURN a.name, b.name, c.name")
             .unwrap();
 
-        assert!(result.row_count() >= 1, "Should find at least one 2-hop path");
+        assert!(
+            result.row_count() >= 1,
+            "Should find at least one 2-hop path"
+        );
     }
 }
 
@@ -776,9 +830,7 @@ mod graphql_tests {
         let db = create_social_network();
         let session = db.session();
 
-        let result = session
-            .execute_graphql("query { person { id } }")
-            .unwrap();
+        let result = session.execute_graphql("query { person { id } }").unwrap();
         assert_eq!(result.row_count(), 3, "Should find 3 Person nodes");
     }
 
@@ -883,9 +935,7 @@ mod cross_language_consistency_gql_cypher {
         let db = create_social_network();
         let session = db.session();
 
-        let gql_result = session
-            .execute("MATCH (n:Person) RETURN COUNT(n)")
-            .unwrap();
+        let gql_result = session.execute("MATCH (n:Person) RETURN COUNT(n)").unwrap();
         let cypher_result = session
             .execute_cypher("MATCH (n:Person) RETURN count(n)")
             .unwrap();
@@ -986,9 +1036,13 @@ mod cross_language_mutations {
         let db = GraphosDB::new_in_memory();
         let session = db.session();
 
-        session.execute("INSERT (:Person {name: 'Alice', age: 30})").unwrap();
+        session
+            .execute("INSERT (:Person {name: 'Alice', age: 30})")
+            .unwrap();
 
-        let result = session.execute_cypher("MATCH (n:Person) RETURN n.name, n.age").unwrap();
+        let result = session
+            .execute_cypher("MATCH (n:Person) RETURN n.name, n.age")
+            .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(result.rows[0][0], Value::String("Alice".into()));
     }
@@ -999,9 +1053,13 @@ mod cross_language_mutations {
         let db = GraphosDB::new_in_memory();
         let session = db.session();
 
-        session.execute_cypher("CREATE (:Person {name: 'Bob', age: 25})").unwrap();
+        session
+            .execute_cypher("CREATE (:Person {name: 'Bob', age: 25})")
+            .unwrap();
 
-        let result = session.execute("MATCH (n:Person) RETURN n.name, n.age").unwrap();
+        let result = session
+            .execute("MATCH (n:Person) RETURN n.name, n.age")
+            .unwrap();
         assert_eq!(result.row_count(), 1);
         assert_eq!(result.rows[0][0], Value::String("Bob".into()));
     }
@@ -1015,10 +1073,16 @@ mod cross_language_mutations {
         session.execute("INSERT (:Person {name: 'Alice'})").unwrap();
 
         // Create with Cypher
-        session.execute_cypher("CREATE (:Person {name: 'Bob'})").unwrap();
+        session
+            .execute_cypher("CREATE (:Person {name: 'Bob'})")
+            .unwrap();
 
         // Verify both exist
         let result = session.execute("MATCH (n:Person) RETURN n").unwrap();
-        assert_eq!(result.row_count(), 2, "Should have 2 nodes from both insert methods");
+        assert_eq!(
+            result.row_count(),
+            2,
+            "Should have 2 nodes from both insert methods"
+        );
     }
 }

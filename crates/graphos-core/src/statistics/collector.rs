@@ -277,11 +277,7 @@ impl ColumnStatistics {
     }
 
     /// Estimates selectivity for a range predicate.
-    pub fn estimate_range_selectivity(
-        &self,
-        lower: Option<&Value>,
-        upper: Option<&Value>,
-    ) -> f64 {
+    pub fn estimate_range_selectivity(&self, lower: Option<&Value>, upper: Option<&Value>) -> f64 {
         if let Some(ref hist) = self.histogram {
             return hist.estimate_range_selectivity(lower, upper, true, true);
         }
@@ -294,7 +290,7 @@ impl ColumnStatistics {
             }
             (Some(_), Some(_), Some(_), None) => 0.5, // Greater than
             (Some(_), Some(_), None, Some(_)) => 0.5, // Less than
-            _ => 0.33, // Default
+            _ => 0.33,                                // Default
         }
     }
 }
@@ -302,7 +298,12 @@ impl ColumnStatistics {
 /// Estimates range selectivity using linear interpolation.
 fn estimate_linear_range(min: &Value, max: &Value, lower: &Value, upper: &Value) -> f64 {
     match (min, max, lower, upper) {
-        (Value::Int64(min_v), Value::Int64(max_v), Value::Int64(lower_v), Value::Int64(upper_v)) => {
+        (
+            Value::Int64(min_v),
+            Value::Int64(max_v),
+            Value::Int64(lower_v),
+            Value::Int64(upper_v),
+        ) => {
             let total_range = (max_v - min_v) as f64;
             if total_range <= 0.0 {
                 return 1.0;
@@ -434,7 +435,8 @@ impl StatisticsCollector {
         };
 
         // Build histogram
-        self.values.sort_by(|a, b| compare_values(a, b).unwrap_or(std::cmp::Ordering::Equal));
+        self.values
+            .sort_by(|a, b| compare_values(a, b).unwrap_or(std::cmp::Ordering::Equal));
         let histogram = if self.values.len() >= num_histogram_buckets {
             Some(Histogram::build(&self.values, num_histogram_buckets))
         } else {
@@ -566,7 +568,8 @@ mod tests {
             .with_degrees(5.0, 3.0)
             .with_property(
                 "age",
-                ColumnStatistics::new(50, 1000, 10).with_min_max(Value::Int64(0), Value::Int64(100)),
+                ColumnStatistics::new(50, 1000, 10)
+                    .with_min_max(Value::Int64(0), Value::Int64(100)),
             );
 
         assert_eq!(stats.node_count, 1000);

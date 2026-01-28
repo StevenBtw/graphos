@@ -101,9 +101,10 @@ impl GraphosDB {
             budget: config.memory_limit.unwrap_or_else(|| {
                 (BufferManagerConfig::detect_system_memory() as f64 * 0.75) as usize
             }),
-            spill_path: config.spill_path.clone().or_else(|| {
-                config.path.as_ref().map(|p| p.join("spill"))
-            }),
+            spill_path: config
+                .spill_path
+                .clone()
+                .or_else(|| config.path.as_ref().map(|p| p.join("spill"))),
             ..BufferManagerConfig::default()
         };
         let buffer_manager = BufferManager::new(buffer_config);
@@ -174,7 +175,9 @@ impl GraphosDB {
                 WalRecord::SetEdgeProperty { id, key, value } => {
                     store.set_edge_property(*id, key, value.clone());
                 }
-                WalRecord::TxCommit { .. } | WalRecord::TxAbort { .. } | WalRecord::Checkpoint { .. } => {
+                WalRecord::TxCommit { .. }
+                | WalRecord::TxAbort { .. }
+                | WalRecord::Checkpoint { .. } => {
                     // Transaction control records don't need replay action
                     // (recovery already filtered to only committed transactions)
                 }
@@ -296,7 +299,9 @@ impl GraphosDB {
     /// ```
     #[cfg(all(feature = "sparql", feature = "rdf"))]
     pub fn execute_sparql(&self, query: &str) -> Result<QueryResult> {
-        use crate::query::{planner_rdf::RdfPlanner, sparql_translator, optimizer::Optimizer, Executor};
+        use crate::query::{
+            Executor, optimizer::Optimizer, planner_rdf::RdfPlanner, sparql_translator,
+        };
 
         // Parse and translate the SPARQL query to a logical plan
         let logical_plan = sparql_translator::translate(query)?;
@@ -380,7 +385,9 @@ impl GraphosDB {
             });
 
             // Log a TxCommit to mark all pending records as committed
-            wal.log(&WalRecord::TxCommit { tx_id: checkpoint_tx })?;
+            wal.log(&WalRecord::TxCommit {
+                tx_id: checkpoint_tx,
+            })?;
 
             // Then checkpoint
             wal.checkpoint(checkpoint_tx, epoch)?;
@@ -468,13 +475,17 @@ impl GraphosDB {
         >,
     ) -> graphos_common::types::NodeId {
         // Collect properties first so we can log them to WAL
-        let props: Vec<(graphos_common::types::PropertyKey, graphos_common::types::Value)> =
-            properties
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect();
+        let props: Vec<(
+            graphos_common::types::PropertyKey,
+            graphos_common::types::Value,
+        )> = properties
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect();
 
-        let id = self.store.create_node_with_props(labels, props.iter().map(|(k, v)| (k.clone(), v.clone())));
+        let id = self
+            .store
+            .create_node_with_props(labels, props.iter().map(|(k, v)| (k.clone(), v.clone())));
 
         // Log node creation to WAL
         if let Err(e) = self.log_wal(&WalRecord::CreateNode {
@@ -585,13 +596,20 @@ impl GraphosDB {
         >,
     ) -> graphos_common::types::EdgeId {
         // Collect properties first so we can log them to WAL
-        let props: Vec<(graphos_common::types::PropertyKey, graphos_common::types::Value)> =
-            properties
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect();
+        let props: Vec<(
+            graphos_common::types::PropertyKey,
+            graphos_common::types::Value,
+        )> = properties
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect();
 
-        let id = self.store.create_edge_with_props(src, dst, edge_type, props.iter().map(|(k, v)| (k.clone(), v.clone())));
+        let id = self.store.create_edge_with_props(
+            src,
+            dst,
+            edge_type,
+            props.iter().map(|(k, v)| (k.clone(), v.clone())),
+        );
 
         // Log edge creation to WAL
         if let Err(e) = self.log_wal(&WalRecord::CreateEdge {
@@ -664,11 +682,7 @@ impl GraphosDB {
     /// Removes a property from a node.
     ///
     /// Returns true if the property existed and was removed, false otherwise.
-    pub fn remove_node_property(
-        &self,
-        id: graphos_common::types::NodeId,
-        key: &str,
-    ) -> bool {
+    pub fn remove_node_property(&self, id: graphos_common::types::NodeId, key: &str) -> bool {
         // Note: RemoveProperty WAL records not yet implemented, but operation works in memory
         self.store.remove_node_property(id, key).is_some()
     }
@@ -676,11 +690,7 @@ impl GraphosDB {
     /// Removes a property from an edge.
     ///
     /// Returns true if the property existed and was removed, false otherwise.
-    pub fn remove_edge_property(
-        &self,
-        id: graphos_common::types::EdgeId,
-        key: &str,
-    ) -> bool {
+    pub fn remove_edge_property(&self, id: graphos_common::types::EdgeId, key: &str) -> bool {
         // Note: RemoveProperty WAL records not yet implemented, but operation works in memory
         self.store.remove_edge_property(id, key).is_some()
     }
@@ -719,7 +729,10 @@ impl QueryResult {
 
     /// Creates a new empty query result with column types.
     #[must_use]
-    pub fn with_types(columns: Vec<String>, column_types: Vec<graphos_common::types::LogicalType>) -> Self {
+    pub fn with_types(
+        columns: Vec<String>,
+        column_types: Vec<graphos_common::types::LogicalType>,
+    ) -> Self {
         Self {
             columns,
             column_types,
@@ -848,8 +861,8 @@ mod tests {
 
     #[test]
     fn test_persistent_database_recovery() {
-        use tempfile::tempdir;
         use graphos_common::types::Value;
+        use tempfile::tempdir;
 
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test_db");

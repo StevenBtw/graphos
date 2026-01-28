@@ -90,7 +90,6 @@ impl SortPushOperator {
     pub fn descending(column: usize) -> Self {
         Self::new(vec![SortKey::descending(column)])
     }
-
 }
 
 /// Compare two rows by sort keys.
@@ -303,7 +302,9 @@ impl SpillableSortPushOperator {
                 .map(|k| crate::execution::spill::SortKey {
                     column: k.column,
                     direction: match k.direction {
-                        SortDirection::Ascending => crate::execution::spill::SortDirection::Ascending,
+                        SortDirection::Ascending => {
+                            crate::execution::spill::SortDirection::Ascending
+                        }
                         SortDirection::Descending => {
                             crate::execution::spill::SortDirection::Descending
                         }
@@ -476,8 +477,8 @@ mod tests {
     #[test]
     fn test_spillable_sort_no_spill() {
         // When threshold is not reached, should work like normal sort
-        let mut sort = SpillableSortPushOperator::new(vec![SortKey::ascending(0)])
-            .with_threshold(100);
+        let mut sort =
+            SpillableSortPushOperator::new(vec![SortKey::ascending(0)]).with_threshold(100);
         let mut sink = CollectorSink::new();
 
         sort.push(create_test_chunk(&[3, 1, 4, 1, 5, 9, 2, 6]), &mut sink)
@@ -537,11 +538,7 @@ mod tests {
         // Push data in multiple chunks
         for i in 0..5 {
             sort.push(
-                create_test_chunk(&[
-                    i * 3 + 3,
-                    i * 3 + 2,
-                    i * 3 + 1,
-                ]),
+                create_test_chunk(&[i * 3 + 3, i * 3 + 2, i * 3 + 1]),
                 &mut sink,
             )
             .unwrap();

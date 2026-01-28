@@ -306,13 +306,15 @@ impl CypherTranslator {
         let node = match pattern {
             ast::Pattern::Node(n) => n,
             ast::Pattern::Path(path) => &path.start,
-            ast::Pattern::NamedPath { pattern: inner, .. } => {
-                match inner.as_ref() {
-                    ast::Pattern::Node(n) => n,
-                    ast::Pattern::Path(path) => &path.start,
-                    _ => return Err(Error::Internal("MERGE NamedPath must contain a node".into())),
+            ast::Pattern::NamedPath { pattern: inner, .. } => match inner.as_ref() {
+                ast::Pattern::Node(n) => n,
+                ast::Pattern::Path(path) => &path.start,
+                _ => {
+                    return Err(Error::Internal(
+                        "MERGE NamedPath must contain a node".into(),
+                    ));
                 }
-            }
+            },
         };
 
         let variable = node
@@ -329,18 +331,20 @@ impl CypherTranslator {
             .collect::<Result<Vec<_>>>()?;
 
         // Extract ON CREATE properties
-        let on_create: Vec<(String, LogicalExpression)> = if let Some(set_clause) = &merge_clause.on_create {
-            self.extract_set_properties(set_clause)?
-        } else {
-            Vec::new()
-        };
+        let on_create: Vec<(String, LogicalExpression)> =
+            if let Some(set_clause) = &merge_clause.on_create {
+                self.extract_set_properties(set_clause)?
+            } else {
+                Vec::new()
+            };
 
         // Extract ON MATCH properties
-        let on_match: Vec<(String, LogicalExpression)> = if let Some(set_clause) = &merge_clause.on_match {
-            self.extract_set_properties(set_clause)?
-        } else {
-            Vec::new()
-        };
+        let on_match: Vec<(String, LogicalExpression)> =
+            if let Some(set_clause) = &merge_clause.on_match {
+                self.extract_set_properties(set_clause)?
+            } else {
+                Vec::new()
+            };
 
         Ok(LogicalOperator::Merge(MergeOp {
             variable,
@@ -359,13 +363,13 @@ impl CypherTranslator {
         expr: &ast::Expression,
     ) -> Result<Vec<(String, LogicalExpression)>> {
         match expr {
-            ast::Expression::Map(pairs) => {
-                pairs
-                    .iter()
-                    .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
-                    .collect()
-            }
-            _ => Err(Error::Internal("Expected map expression for properties".into())),
+            ast::Expression::Map(pairs) => pairs
+                .iter()
+                .map(|(k, v)| Ok((k.clone(), self.translate_expression(v)?)))
+                .collect(),
+            _ => Err(Error::Internal(
+                "Expected map expression for properties".into(),
+            )),
         }
     }
 
@@ -377,10 +381,17 @@ impl CypherTranslator {
         let mut properties = Vec::new();
         for item in &set_clause.items {
             match item {
-                ast::SetItem::Property { variable: _, property, value } => {
+                ast::SetItem::Property {
+                    variable: _,
+                    property,
+                    value,
+                } => {
                     properties.push((property.clone(), self.translate_expression(value)?));
                 }
-                ast::SetItem::AllProperties { variable: _, properties: prop_expr } => {
+                ast::SetItem::AllProperties {
+                    variable: _,
+                    properties: prop_expr,
+                } => {
                     // n = {props} - extract all properties from the map
                     if let ast::Expression::Map(pairs) = prop_expr {
                         for (k, v) in pairs {
@@ -388,7 +399,10 @@ impl CypherTranslator {
                         }
                     }
                 }
-                ast::SetItem::MergeProperties { variable: _, properties: prop_expr } => {
+                ast::SetItem::MergeProperties {
+                    variable: _,
+                    properties: prop_expr,
+                } => {
                     // n += {props} - merge properties
                     if let ast::Expression::Map(pairs) = prop_expr {
                         for (k, v) in pairs {
@@ -414,9 +428,9 @@ impl CypherTranslator {
         // Check if RETURN contains aggregate functions
         let has_aggregates = match &return_clause.items {
             ast::ReturnItems::All => false,
-            ast::ReturnItems::Explicit(items) => {
-                items.iter().any(|item| contains_aggregate(&item.expression))
-            }
+            ast::ReturnItems::Explicit(items) => items
+                .iter()
+                .any(|item| contains_aggregate(&item.expression)),
         };
 
         if has_aggregates {
@@ -465,7 +479,11 @@ impl CypherTranslator {
         let mut group_by = Vec::new();
 
         let items = match &return_clause.items {
-            ast::ReturnItems::All => return Err(Error::Internal("Cannot use RETURN * with aggregates".into())),
+            ast::ReturnItems::All => {
+                return Err(Error::Internal(
+                    "Cannot use RETURN * with aggregates".into(),
+                ));
+            }
             ast::ReturnItems::Explicit(items) => items,
         };
 
@@ -489,7 +507,11 @@ impl CypherTranslator {
         alias: &Option<String>,
     ) -> Result<Option<AggregateExpr>> {
         match expr {
-            ast::Expression::FunctionCall { name, args, distinct } => {
+            ast::Expression::FunctionCall {
+                name,
+                args,
+                distinct,
+            } => {
                 if let Some(function) = to_aggregate_function(name) {
                     let expression = if args.is_empty() {
                         None
@@ -708,7 +730,11 @@ impl CypherTranslator {
         // Group items by variable
         for item in &set_clause.items {
             match item {
-                ast::SetItem::Property { variable, property, value } => {
+                ast::SetItem::Property {
+                    variable,
+                    property,
+                    value,
+                } => {
                     // SET n.prop = value
                     let value_expr = self.translate_expression(value)?;
                     plan = LogicalOperator::SetProperty(SetPropertyOp {
@@ -718,7 +744,10 @@ impl CypherTranslator {
                         input: Box::new(plan),
                     });
                 }
-                ast::SetItem::AllProperties { variable, properties } => {
+                ast::SetItem::AllProperties {
+                    variable,
+                    properties,
+                } => {
                     // SET n = {...} or SET n = m
                     let value_expr = self.translate_expression(properties)?;
                     plan = LogicalOperator::SetProperty(SetPropertyOp {
@@ -728,7 +757,10 @@ impl CypherTranslator {
                         input: Box::new(plan),
                     });
                 }
-                ast::SetItem::MergeProperties { variable, properties } => {
+                ast::SetItem::MergeProperties {
+                    variable,
+                    properties,
+                } => {
                     // SET n += {...}
                     let value_expr = self.translate_expression(properties)?;
                     plan = LogicalOperator::SetProperty(SetPropertyOp {
@@ -762,7 +794,10 @@ impl CypherTranslator {
                     // REMOVE n.prop sets the property to null
                     plan = LogicalOperator::SetProperty(SetPropertyOp {
                         variable: variable.clone(),
-                        properties: vec![(property.clone(), LogicalExpression::Literal(Value::Null))],
+                        properties: vec![(
+                            property.clone(),
+                            LogicalExpression::Literal(Value::Null),
+                        )],
                         replace: false,
                         input: Box::new(plan),
                     });
@@ -1456,7 +1491,8 @@ mod tests {
 
     #[test]
     fn test_translate_merge_on_create() {
-        let plan = translate("MERGE (n:Person {name: 'Alice'}) ON CREATE SET n.created = true").unwrap();
+        let plan =
+            translate("MERGE (n:Person {name: 'Alice'}) ON CREATE SET n.created = true").unwrap();
 
         if let LogicalOperator::Merge(merge) = &plan.root {
             assert_eq!(merge.on_create.len(), 1);
@@ -1520,10 +1556,17 @@ mod tests {
 
     #[test]
     fn test_translate_case_expression() {
-        let plan = translate("MATCH (n:Person) RETURN CASE WHEN n.age > 18 THEN 'adult' ELSE 'minor' END").unwrap();
+        let plan =
+            translate("MATCH (n:Person) RETURN CASE WHEN n.age > 18 THEN 'adult' ELSE 'minor' END")
+                .unwrap();
 
         if let LogicalOperator::Return(ret) = &plan.root {
-            if let LogicalExpression::Case { when_clauses, else_clause, .. } = &ret.items[0].expression {
+            if let LogicalExpression::Case {
+                when_clauses,
+                else_clause,
+                ..
+            } = &ret.items[0].expression
+            {
                 assert_eq!(when_clauses.len(), 1);
                 assert!(else_clause.is_some());
             } else {
@@ -1563,30 +1606,88 @@ mod tests {
         let translator = CypherTranslator::new();
 
         // Test all supported binary ops
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Eq).unwrap(), BinaryOp::Eq);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Ne).unwrap(), BinaryOp::Ne);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Lt).unwrap(), BinaryOp::Lt);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Le).unwrap(), BinaryOp::Le);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Gt).unwrap(), BinaryOp::Gt);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Ge).unwrap(), BinaryOp::Ge);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::And).unwrap(), BinaryOp::And);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Or).unwrap(), BinaryOp::Or);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Xor).unwrap(), BinaryOp::Xor);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Add).unwrap(), BinaryOp::Add);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Sub).unwrap(), BinaryOp::Sub);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Mul).unwrap(), BinaryOp::Mul);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Div).unwrap(), BinaryOp::Div);
-        assert_eq!(translator.translate_binary_op(&ast::BinaryOp::Mod).unwrap(), BinaryOp::Mod);
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Eq).unwrap(),
+            BinaryOp::Eq
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Ne).unwrap(),
+            BinaryOp::Ne
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Lt).unwrap(),
+            BinaryOp::Lt
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Le).unwrap(),
+            BinaryOp::Le
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Gt).unwrap(),
+            BinaryOp::Gt
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Ge).unwrap(),
+            BinaryOp::Ge
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::And).unwrap(),
+            BinaryOp::And
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Or).unwrap(),
+            BinaryOp::Or
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Xor).unwrap(),
+            BinaryOp::Xor
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Add).unwrap(),
+            BinaryOp::Add
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Sub).unwrap(),
+            BinaryOp::Sub
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Mul).unwrap(),
+            BinaryOp::Mul
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Div).unwrap(),
+            BinaryOp::Div
+        );
+        assert_eq!(
+            translator.translate_binary_op(&ast::BinaryOp::Mod).unwrap(),
+            BinaryOp::Mod
+        );
     }
 
     #[test]
     fn test_translate_unary_op_all() {
         let translator = CypherTranslator::new();
 
-        assert_eq!(translator.translate_unary_op(&ast::UnaryOp::Not).unwrap(), UnaryOp::Not);
-        assert_eq!(translator.translate_unary_op(&ast::UnaryOp::Neg).unwrap(), UnaryOp::Neg);
-        assert_eq!(translator.translate_unary_op(&ast::UnaryOp::IsNull).unwrap(), UnaryOp::IsNull);
-        assert_eq!(translator.translate_unary_op(&ast::UnaryOp::IsNotNull).unwrap(), UnaryOp::IsNotNull);
+        assert_eq!(
+            translator.translate_unary_op(&ast::UnaryOp::Not).unwrap(),
+            UnaryOp::Not
+        );
+        assert_eq!(
+            translator.translate_unary_op(&ast::UnaryOp::Neg).unwrap(),
+            UnaryOp::Neg
+        );
+        assert_eq!(
+            translator
+                .translate_unary_op(&ast::UnaryOp::IsNull)
+                .unwrap(),
+            UnaryOp::IsNull
+        );
+        assert_eq!(
+            translator
+                .translate_unary_op(&ast::UnaryOp::IsNotNull)
+                .unwrap(),
+            UnaryOp::IsNotNull
+        );
     }
 
     #[test]
@@ -1597,13 +1698,25 @@ mod tests {
         let null_lit = translator.translate_literal(&ast::Literal::Null).unwrap();
         assert!(matches!(null_lit, LogicalExpression::Literal(Value::Null)));
 
-        let bool_lit = translator.translate_literal(&ast::Literal::Bool(true)).unwrap();
-        assert!(matches!(bool_lit, LogicalExpression::Literal(Value::Bool(true))));
+        let bool_lit = translator
+            .translate_literal(&ast::Literal::Bool(true))
+            .unwrap();
+        assert!(matches!(
+            bool_lit,
+            LogicalExpression::Literal(Value::Bool(true))
+        ));
 
-        let int_lit = translator.translate_literal(&ast::Literal::Integer(42)).unwrap();
-        assert!(matches!(int_lit, LogicalExpression::Literal(Value::Int64(42))));
+        let int_lit = translator
+            .translate_literal(&ast::Literal::Integer(42))
+            .unwrap();
+        assert!(matches!(
+            int_lit,
+            LogicalExpression::Literal(Value::Int64(42))
+        ));
 
-        let float_lit = translator.translate_literal(&ast::Literal::Float(3.14)).unwrap();
+        let float_lit = translator
+            .translate_literal(&ast::Literal::Float(3.14))
+            .unwrap();
         if let LogicalExpression::Literal(Value::Float64(f)) = float_lit {
             assert!((f - 3.14).abs() < 0.001);
         } else {

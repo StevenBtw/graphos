@@ -9,20 +9,20 @@ use std::str::Chars;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // Punctuation
-    Bang,        // !
-    Dollar,      // $
-    Amp,         // &
-    LParen,      // (
-    RParen,      // )
-    Spread,      // ...
-    Colon,       // :
-    Eq,          // =
-    At,          // @
-    LBracket,    // [
-    RBracket,    // ]
-    LBrace,      // {
-    RBrace,      // }
-    Pipe,        // |
+    Bang,     // !
+    Dollar,   // $
+    Amp,      // &
+    LParen,   // (
+    RParen,   // )
+    Spread,   // ...
+    Colon,    // :
+    Eq,       // =
+    At,       // @
+    LBracket, // [
+    RBracket, // ]
+    LBrace,   // {
+    RBrace,   // }
+    Pipe,     // |
 
     // Literals
     Name(String),
@@ -271,9 +271,7 @@ impl<'a> Lexer<'a> {
                 Some('\\') => {
                     self.advance();
                     // Block strings only escape """
-                    if self.peek() == Some('"')
-                        && self.peek_next() == Some('"')
-                    {
+                    if self.peek() == Some('"') && self.peek_next() == Some('"') {
                         // Check for escaped """
                         value.push_str("\"\"\"");
                         self.advance();

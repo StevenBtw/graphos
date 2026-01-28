@@ -1,8 +1,8 @@
 //! Memory grant RAII wrapper for automatic resource release.
 
 use super::region::MemoryRegion;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Trait for releasing memory grants.
 ///

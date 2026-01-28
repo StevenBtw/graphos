@@ -227,7 +227,11 @@ impl DeltaEncoding {
             offset += 8;
         }
 
-        Ok(Self { base, deltas, count })
+        Ok(Self {
+            base,
+            deltas,
+            count,
+        })
     }
 }
 

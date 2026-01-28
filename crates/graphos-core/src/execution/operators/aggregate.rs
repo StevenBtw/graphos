@@ -39,8 +39,8 @@ impl From<Value> for HashableValue {
 }
 
 use super::{Operator, OperatorError, OperatorResult};
-use crate::execution::chunk::DataChunkBuilder;
 use crate::execution::DataChunk;
+use crate::execution::chunk::DataChunkBuilder;
 
 /// Aggregation function types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,13 +226,9 @@ impl AggregateState {
                 AggregateState::CountDistinct(0, HashSet::new())
             }
             (AggregateFunction::Sum, false) => AggregateState::SumInt(0),
-            (AggregateFunction::Sum, true) => {
-                AggregateState::SumIntDistinct(0, HashSet::new())
-            }
+            (AggregateFunction::Sum, true) => AggregateState::SumIntDistinct(0, HashSet::new()),
             (AggregateFunction::Avg, false) => AggregateState::Avg(0.0, 0),
-            (AggregateFunction::Avg, true) => {
-                AggregateState::AvgDistinct(0.0, 0, HashSet::new())
-            }
+            (AggregateFunction::Avg, true) => AggregateState::AvgDistinct(0.0, 0, HashSet::new()),
             (AggregateFunction::Min, _) => AggregateState::Min(None), // MIN/MAX don't need distinct
             (AggregateFunction::Max, _) => AggregateState::Max(None),
             (AggregateFunction::First, _) => AggregateState::First(None),
@@ -530,9 +526,9 @@ impl HashAggregateOperator {
                 for (i, agg) in self.aggregates.iter().enumerate() {
                     let value = match agg.function {
                         AggregateFunction::Count => None, // COUNT(*) doesn't need a value
-                        _ => agg.column.and_then(|col| {
-                            chunk.column(col).and_then(|c| c.get_value(row))
-                        }),
+                        _ => agg
+                            .column
+                            .and_then(|col| chunk.column(col).and_then(|c| c.get_value(row))),
                     };
 
                     // For COUNT, always update. For others, skip nulls unless counting.
@@ -761,8 +757,7 @@ mod tests {
     impl Operator for MockOperator {
         fn next(&mut self) -> OperatorResult {
             if self.position < self.chunks.len() {
-                let chunk =
-                    std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
+                let chunk = std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
                 self.position += 1;
                 Ok(Some(chunk))
             } else {
@@ -867,8 +862,8 @@ mod tests {
         // GROUP BY column 0, SUM(column 1)
         let mut agg = HashAggregateOperator::new(
             Box::new(mock),
-            vec![0],                      // Group by column 0
-            vec![AggregateExpr::sum(1)],  // Sum of column 1
+            vec![0],                     // Group by column 0
+            vec![AggregateExpr::sum(1)], // Sum of column 1
             vec![LogicalType::Int64, LogicalType::Int64],
         );
 
@@ -883,7 +878,7 @@ mod tests {
 
         results.sort_by_key(|(g, _)| *g);
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0], (1, 30));  // Group 1: 10 + 20 = 30
+        assert_eq!(results[0], (1, 30)); // Group 1: 10 + 20 = 30
         assert_eq!(results[1], (2, 120)); // Group 2: 30 + 40 + 50 = 120
     }
 

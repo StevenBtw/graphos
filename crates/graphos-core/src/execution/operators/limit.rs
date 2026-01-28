@@ -297,8 +297,8 @@ impl Operator for LimitSkipOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::chunk::DataChunkBuilder;
     use crate::execution::DataChunk;
+    use crate::execution::chunk::DataChunkBuilder;
 
     struct MockOperator {
         chunks: Vec<DataChunk>,
@@ -317,8 +317,7 @@ mod tests {
     impl Operator for MockOperator {
         fn next(&mut self) -> OperatorResult {
             if self.position < self.chunks.len() {
-                let chunk =
-                    std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
+                let chunk = std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
                 self.position += 1;
                 Ok(Some(chunk))
             } else {
@@ -407,7 +406,9 @@ mod tests {
 
     #[test]
     fn test_limit_skip_combined() {
-        let mock = MockOperator::new(vec![create_numbered_chunk(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10])]);
+        let mock = MockOperator::new(vec![create_numbered_chunk(&[
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+        ])]);
 
         let mut op = LimitSkipOperator::new(
             Box::new(mock),

@@ -2,8 +2,8 @@
 
 use super::{Operator, OperatorError, OperatorResult};
 use crate::execution::DataChunk;
-use crate::graph::lpg::LpgStore;
 use crate::graph::Direction;
+use crate::graph::lpg::LpgStore;
 use graphos_common::types::{EdgeId, EpochId, LogicalType, NodeId, TxId};
 use std::sync::Arc;
 
@@ -146,8 +146,10 @@ impl ExpandOperator {
                 if let Some(epoch) = epoch {
                     // Check if edge and target node are visible
                     let edge_visible = self.store.get_edge_versioned(*edge_id, epoch, tx).is_some();
-                    let target_visible =
-                        self.store.get_node_versioned(*target_id, epoch, tx).is_some();
+                    let target_visible = self
+                        .store
+                        .get_node_versioned(*target_id, epoch, tx)
+                        .is_some();
                     edge_visible && target_visible
                 } else {
                     true
@@ -182,7 +184,11 @@ impl Operator for ExpandOperator {
         // Build schema: [input_columns..., edge, target]
         let input_col_count = input_chunk.column_count();
         let mut schema: Vec<LogicalType> = (0..input_col_count)
-            .map(|i| input_chunk.column(i).map_or(LogicalType::Any, |c| c.data_type().clone()))
+            .map(|i| {
+                input_chunk
+                    .column(i)
+                    .map_or(LogicalType::Any, |c| c.data_type().clone())
+            })
             .collect();
         schema.push(LogicalType::Edge);
         schema.push(LogicalType::Node);
@@ -369,13 +375,8 @@ mod tests {
         // Scan Bob
         let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
 
-        let mut expand = ExpandOperator::new(
-            Arc::clone(&store),
-            scan,
-            0,
-            Direction::Incoming,
-            None,
-        );
+        let mut expand =
+            ExpandOperator::new(Arc::clone(&store), scan, 0, Direction::Incoming, None);
 
         let mut results = Vec::new();
         while let Ok(Some(chunk)) = expand.next() {
@@ -400,13 +401,8 @@ mod tests {
 
         let scan = Box::new(ScanOperator::with_label(Arc::clone(&store), "Person"));
 
-        let mut expand = ExpandOperator::new(
-            Arc::clone(&store),
-            scan,
-            0,
-            Direction::Outgoing,
-            None,
-        );
+        let mut expand =
+            ExpandOperator::new(Arc::clone(&store), scan, 0, Direction::Outgoing, None);
 
         let result = expand.next().unwrap();
         assert!(result.is_none());

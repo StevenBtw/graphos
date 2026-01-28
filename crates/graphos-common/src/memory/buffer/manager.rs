@@ -6,8 +6,8 @@ use super::region::MemoryRegion;
 use super::stats::{BufferStats, PressureLevel};
 use parking_lot::RwLock;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Default memory budget as a fraction of system memory.
 const DEFAULT_MEMORY_FRACTION: f64 = 0.75;
@@ -166,7 +166,11 @@ impl BufferManager {
     ///
     /// Returns `None` if allocation would exceed the hard limit after
     /// eviction attempts.
-    pub fn try_allocate(self: &Arc<Self>, size: usize, region: MemoryRegion) -> Option<MemoryGrant> {
+    pub fn try_allocate(
+        self: &Arc<Self>,
+        size: usize,
+        region: MemoryRegion,
+    ) -> Option<MemoryGrant> {
         // Check if we can allocate
         let current = self.allocated.load(Ordering::Relaxed);
 
@@ -264,7 +268,9 @@ impl BufferManager {
     /// Returns available bytes.
     #[must_use]
     pub fn available(&self) -> usize {
-        self.config.budget.saturating_sub(self.allocated.load(Ordering::Relaxed))
+        self.config
+            .budget
+            .saturating_sub(self.allocated.load(Ordering::Relaxed))
     }
 
     /// Shuts down the buffer manager.

@@ -3,7 +3,7 @@
 //! Extends the Source trait with capabilities needed for parallel execution:
 //! knowing total row count, creating partitions for morsels, etc.
 
-use super::morsel::{generate_morsels, Morsel};
+use super::morsel::{Morsel, generate_morsels};
 use crate::execution::chunk::DataChunk;
 use crate::execution::operators::OperatorError;
 use crate::execution::pipeline::Source;
@@ -375,7 +375,9 @@ impl Source for RangeSource {
         }
 
         let end = (self.position + chunk_size).min(self.total);
-        let values: Vec<Value> = (self.position..end).map(|i| Value::Int64(i as i64)).collect();
+        let values: Vec<Value> = (self.position..end)
+            .map(|i| Value::Int64(i as i64))
+            .collect();
 
         self.position = end;
         Ok(Some(DataChunk::new(vec![ValueVector::from_values(
@@ -430,7 +432,9 @@ impl Source for RangePartition {
         }
 
         let end = (self.position + chunk_size).min(self.end);
-        let values: Vec<Value> = (self.position..end).map(|i| Value::Int64(i as i64)).collect();
+        let values: Vec<Value> = (self.position..end)
+            .map(|i| Value::Int64(i as i64))
+            .collect();
 
         self.position = end;
         Ok(Some(DataChunk::new(vec![ValueVector::from_values(
@@ -577,7 +581,9 @@ impl Source for PartitionedTripleScanSource {
             return Ok(None);
         }
 
-        let end = (self.position + chunk_size).min(self.end_row).min(self.triples.len());
+        let end = (self.position + chunk_size)
+            .min(self.end_row)
+            .min(self.triples.len());
         let slice = &self.triples[self.position..end];
 
         let mut subjects = Vec::with_capacity(slice.len());
@@ -708,7 +714,10 @@ mod tests {
                     first_value = Some(v);
                 }
             }
-            if let Some(Value::Int64(v)) = chunk.column(0).and_then(|c| c.get(chunk.len().saturating_sub(1))) {
+            if let Some(Value::Int64(v)) = chunk
+                .column(0)
+                .and_then(|c| c.get(chunk.len().saturating_sub(1)))
+            {
                 last_value = Some(v);
             }
             total += chunk.len();
@@ -738,11 +747,24 @@ mod tests {
     #[test]
     fn test_parallel_triple_scan_source() {
         let triples = vec![
-            (Value::String("s1".into()), Value::String("p1".into()), Value::String("o1".into())),
-            (Value::String("s2".into()), Value::String("p2".into()), Value::String("o2".into())),
-            (Value::String("s3".into()), Value::String("p3".into()), Value::String("o3".into())),
+            (
+                Value::String("s1".into()),
+                Value::String("p1".into()),
+                Value::String("o1".into()),
+            ),
+            (
+                Value::String("s2".into()),
+                Value::String("p2".into()),
+                Value::String("o2".into()),
+            ),
+            (
+                Value::String("s3".into()),
+                Value::String("p3".into()),
+                Value::String("o3".into()),
+            ),
         ];
-        let source = ParallelTripleScanSource::new(triples, vec!["s".into(), "p".into(), "o".into()]);
+        let source =
+            ParallelTripleScanSource::new(triples, vec!["s".into(), "p".into(), "o".into()]);
 
         assert_eq!(source.total_rows(), Some(3));
         assert!(source.is_partitionable());
@@ -761,7 +783,8 @@ mod tests {
                 )
             })
             .collect();
-        let source = ParallelTripleScanSource::new(triples, vec!["s".into(), "p".into(), "o".into()]);
+        let source =
+            ParallelTripleScanSource::new(triples, vec!["s".into(), "p".into(), "o".into()]);
 
         let morsel = Morsel::new(0, 0, 20, 50);
         let mut partition = source.create_partition(&morsel);

@@ -279,11 +279,7 @@ impl CostModel {
     /// Compares two costs and returns the cheaper one.
     #[must_use]
     pub fn cheaper<'a>(&self, a: &'a Cost, b: &'a Cost) -> &'a Cost {
-        if a.total() <= b.total() {
-            a
-        } else {
-            b
-        }
+        if a.total() <= b.total() { a } else { b }
     }
 }
 

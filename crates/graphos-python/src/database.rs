@@ -152,7 +152,8 @@ impl PyGraphosDB {
                 let val = PyValue::from_py(&value).map_err(PyGraphosError::from)?;
                 param_map.insert(key_str, val);
             }
-            db.execute_with_params(query, param_map).map_err(PyGraphosError::from)?
+            db.execute_with_params(query, param_map)
+                .map_err(PyGraphosError::from)?
         } else {
             db.execute(query).map_err(PyGraphosError::from)?
         };
@@ -254,7 +255,8 @@ impl PyGraphosDB {
                 let val = PyValue::from_py(&value).map_err(PyGraphosError::from)?;
                 param_map.insert(key_str, val);
             }
-            db.execute_gremlin_with_params(query, param_map).map_err(PyGraphosError::from)?
+            db.execute_gremlin_with_params(query, param_map)
+                .map_err(PyGraphosError::from)?
         } else {
             db.execute_gremlin(query).map_err(PyGraphosError::from)?
         };
@@ -289,7 +291,8 @@ impl PyGraphosDB {
                 let val = PyValue::from_py(&value).map_err(PyGraphosError::from)?;
                 param_map.insert(key_str, val);
             }
-            db.execute_graphql_with_params(query, param_map).map_err(PyGraphosError::from)?
+            db.execute_graphql_with_params(query, param_map)
+                .map_err(PyGraphosError::from)?
         } else {
             db.execute_graphql(query).map_err(PyGraphosError::from)?
         };
@@ -868,14 +871,26 @@ fn extract_entities(result: &QueryResult, db: &GraphosDB) -> (Vec<PyNode>, Vec<P
         .column_types
         .iter()
         .enumerate()
-        .filter_map(|(i, t)| if *t == LogicalType::Node { Some(i) } else { None })
+        .filter_map(|(i, t)| {
+            if *t == LogicalType::Node {
+                Some(i)
+            } else {
+                None
+            }
+        })
         .collect();
 
     let edge_cols: Vec<usize> = result
         .column_types
         .iter()
         .enumerate()
-        .filter_map(|(i, t)| if *t == LogicalType::Edge { Some(i) } else { None })
+        .filter_map(|(i, t)| {
+            if *t == LogicalType::Edge {
+                Some(i)
+            } else {
+                None
+            }
+        })
         .collect();
 
     // Extract unique nodes and edges from result rows
@@ -887,7 +902,8 @@ fn extract_entities(result: &QueryResult, db: &GraphosDB) -> (Vec<PyNode>, Vec<P
                 if !seen_node_ids.contains(&node_id) {
                     seen_node_ids.insert(node_id);
                     if let Some(node) = db.get_node(node_id) {
-                        let labels: Vec<String> = node.labels.iter().map(|s| s.to_string()).collect();
+                        let labels: Vec<String> =
+                            node.labels.iter().map(|s| s.to_string()).collect();
                         let properties: HashMap<String, Value> = node
                             .properties
                             .into_iter()

@@ -77,12 +77,9 @@ impl PySolvORAdapter {
         let store = db.store();
 
         let result = match method {
-            "dijkstra" => algorithms::dijkstra_path(
-                store,
-                NodeId::new(source),
-                NodeId::new(target),
-                weight,
-            ),
+            "dijkstra" => {
+                algorithms::dijkstra_path(store, NodeId::new(source), NodeId::new(target), weight)
+            }
             "bellman_ford" => {
                 let bf_result = algorithms::bellman_ford(store, NodeId::new(source), weight);
                 if bf_result.has_negative_cycle {
@@ -115,7 +112,7 @@ impl PySolvORAdapter {
                     "Unknown method: {}. Use 'dijkstra', 'bellman_ford', or 'astar'",
                     method
                 ))
-                .into())
+                .into());
             }
         };
 
@@ -207,9 +204,9 @@ impl PySolvORAdapter {
 
                 Ok(dict.into_any().unbind())
             }
-            None => Err(
-                PyGraphosError::InvalidArgument("Invalid source or sink node".into()).into(),
-            ),
+            None => {
+                Err(PyGraphosError::InvalidArgument("Invalid source or sink node".into()).into())
+            }
         }
     }
 
@@ -259,9 +256,9 @@ impl PySolvORAdapter {
 
                 Ok(dict.into_any().unbind())
             }
-            None => Err(
-                PyGraphosError::InvalidArgument("Invalid source or sink node".into()).into(),
-            ),
+            None => {
+                Err(PyGraphosError::InvalidArgument("Invalid source or sink node".into()).into())
+            }
         }
     }
 
@@ -298,7 +295,7 @@ impl PySolvORAdapter {
                     "Unknown method: {}. Use 'kruskal' or 'prim'",
                     method
                 ))
-                .into())
+                .into());
             }
         };
 
@@ -371,12 +368,7 @@ impl PySolvORAdapter {
     /// Returns:
     ///     Dict mapping node ID to PageRank score.
     #[pyo3(signature = (damping=0.85, max_iter=100, tol=1e-6))]
-    fn pagerank(
-        &self,
-        damping: f64,
-        max_iter: usize,
-        tol: f64,
-    ) -> PyResult<HashMap<u64, f64>> {
+    fn pagerank(&self, damping: f64, max_iter: usize, tol: f64) -> PyResult<HashMap<u64, f64>> {
         use graphos_adapters::plugins::algorithms;
 
         let db = self.db.read();

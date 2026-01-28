@@ -216,7 +216,9 @@ impl<'a> Parser<'a> {
             self.advance();
 
             // Check for fragment spread or inline fragment
-            if self.check(TokenKind::On) || self.check(TokenKind::At) || self.check(TokenKind::LBrace)
+            if self.check(TokenKind::On)
+                || self.check(TokenKind::At)
+                || self.check(TokenKind::LBrace)
             {
                 // Inline fragment
                 let type_condition = if self.check(TokenKind::On) {
@@ -239,7 +241,10 @@ impl<'a> Parser<'a> {
                 let name = self.parse_name()?;
                 let directives = self.parse_directives()?;
 
-                Ok(Selection::FragmentSpread(FragmentSpread { name, directives }))
+                Ok(Selection::FragmentSpread(FragmentSpread {
+                    name,
+                    directives,
+                }))
             }
         } else {
             // Field
@@ -470,7 +475,8 @@ mod tests {
 
     #[test]
     fn test_parse_mutation() {
-        let mut parser = Parser::new("mutation CreateUser($name: String!) { createUser(name: $name) { id } }");
+        let mut parser =
+            Parser::new("mutation CreateUser($name: String!) { createUser(name: $name) { id } }");
         let result = parser.parse();
         assert!(result.is_ok());
         let doc = result.unwrap();

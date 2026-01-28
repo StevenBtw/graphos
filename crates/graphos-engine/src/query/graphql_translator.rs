@@ -84,7 +84,12 @@ impl GraphQLTranslator {
                 ast::Definition::Operation(op) => Some(op),
                 _ => None,
             })
-            .ok_or_else(|| Error::Query(QueryError::new(QueryErrorKind::Syntax, "No operation found in document")))?;
+            .ok_or_else(|| {
+                Error::Query(QueryError::new(
+                    QueryErrorKind::Syntax,
+                    "No operation found in document",
+                ))
+            })?;
 
         // Create translator with fragments
         let translator = GraphQLTranslator {
@@ -145,7 +150,10 @@ impl GraphQLTranslator {
         } else {
             Err(Error::Query(QueryError::new(
                 QueryErrorKind::Semantic,
-                &format!("Unknown mutation: {}. Expected createX, updateX, or deleteX", name),
+                &format!(
+                    "Unknown mutation: {}. Expected createX, updateX, or deleteX",
+                    name
+                ),
             )))
         }
     }
@@ -385,11 +393,7 @@ impl GraphQLTranslator {
     }
 
     /// Extracts special arguments (first, skip, orderBy) from field arguments.
-    fn extract_special_args<'a>(
-        &self,
-        args: &'a [ast::Argument],
-        var: &str,
-    ) -> ExtractedArgs<'a> {
+    fn extract_special_args<'a>(&self, args: &'a [ast::Argument], var: &str) -> ExtractedArgs<'a> {
         let mut first = None;
         let mut skip = None;
         let mut order_by = None;
@@ -460,7 +464,10 @@ impl GraphQLTranslator {
                         let (new_plan, nested_var) =
                             self.translate_nested_field(field, plan, current_var)?;
                         plan = new_plan;
-                        nested_vars.push((field.alias.clone().unwrap_or(field.name.clone()), nested_var));
+                        nested_vars.push((
+                            field.alias.clone().unwrap_or(field.name.clone()),
+                            nested_var,
+                        ));
                     } else {
                         // Scalar field - add to return items
                         let alias = field.alias.clone().unwrap_or(field.name.clone());
@@ -476,8 +483,7 @@ impl GraphQLTranslator {
                 ast::Selection::FragmentSpread(spread) => {
                     // Resolve fragment and include its fields
                     if let Some(frag) = self.fragments.get(&spread.name) {
-                        let (new_plan, items) =
-                            self.expand_fragment(frag, plan, current_var)?;
+                        let (new_plan, items) = self.expand_fragment(frag, plan, current_var)?;
                         plan = new_plan;
                         return_items.extend(items);
                     }
@@ -612,11 +618,7 @@ impl GraphQLTranslator {
     }
 
     /// Legacy translate_arguments for nested fields (still uses simple equality).
-    fn translate_arguments(
-        &self,
-        args: &[ast::Argument],
-        var: &str,
-    ) -> Result<LogicalExpression> {
+    fn translate_arguments(&self, args: &[ast::Argument], var: &str) -> Result<LogicalExpression> {
         let refs: Vec<&ast::Argument> = args.iter().collect();
         self.translate_filter_arguments(&refs, var)
     }
@@ -653,10 +655,7 @@ impl GraphQLTranslator {
     }
 
     /// Combines predicates with AND.
-    fn combine_with_and(
-        &self,
-        predicates: Vec<LogicalExpression>,
-    ) -> Result<LogicalExpression> {
+    fn combine_with_and(&self, predicates: Vec<LogicalExpression>) -> Result<LogicalExpression> {
         if predicates.is_empty() {
             return Err(Error::Internal("No predicates".to_string()));
         }
@@ -732,7 +731,10 @@ impl GraphQLTranslator {
                 return Ok(field);
             }
         }
-        Err(Error::Query(QueryError::new(QueryErrorKind::Syntax, "No field found in selection set")))
+        Err(Error::Query(QueryError::new(
+            QueryErrorKind::Syntax,
+            "No field found in selection set",
+        )))
     }
 
     fn capitalize_first(&self, s: &str) -> String {

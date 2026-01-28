@@ -2,8 +2,8 @@
 
 use super::{Operator, OperatorResult};
 use crate::execution::{DataChunk, SelectionVector};
-use crate::graph::lpg::LpgStore;
 use crate::graph::Direction;
+use crate::graph::lpg::LpgStore;
 use graphos_common::types::{PropertyKey, Value};
 use regex::Regex;
 use std::collections::{BTreeMap, HashMap};
@@ -331,7 +331,8 @@ impl ExpressionPredicate {
                 let map: BTreeMap<PropertyKey, Value> = pairs
                     .iter()
                     .filter_map(|(k, v)| {
-                        self.eval_expr(v, chunk, row).map(|val| (PropertyKey::new(k.clone()), val))
+                        self.eval_expr(v, chunk, row)
+                            .map(|val| (PropertyKey::new(k.clone()), val))
                     })
                     .collect();
                 Some(Value::Map(Arc::new(map)))
@@ -357,7 +358,9 @@ impl ExpressionPredicate {
                         } else {
                             *i as usize
                         };
-                        s.chars().nth(idx).map(|c| Value::String(c.to_string().into()))
+                        s.chars()
+                            .nth(idx)
+                            .map(|c| Value::String(c.to_string().into()))
                     }
                     (Value::Map(m), Value::String(key)) => {
                         let prop_key = PropertyKey::new(key.as_ref());
@@ -371,7 +374,13 @@ impl ExpressionPredicate {
                 let start_idx = start
                     .as_ref()
                     .and_then(|s| self.eval_expr(s, chunk, row))
-                    .and_then(|v| if let Value::Int64(i) = v { Some(i as usize) } else { None })
+                    .and_then(|v| {
+                        if let Value::Int64(i) = v {
+                            Some(i as usize)
+                        } else {
+                            None
+                        }
+                    })
                     .unwrap_or(0);
 
                 match &base_val {
@@ -379,7 +388,13 @@ impl ExpressionPredicate {
                         let end_idx = end
                             .as_ref()
                             .and_then(|e| self.eval_expr(e, chunk, row))
-                            .and_then(|v| if let Value::Int64(i) = v { Some(i as usize) } else { None })
+                            .and_then(|v| {
+                                if let Value::Int64(i) = v {
+                                    Some(i as usize)
+                                } else {
+                                    None
+                                }
+                            })
                             .unwrap_or(items.len());
                         let sliced: Vec<Value> = items
                             .get(start_idx..end_idx.min(items.len()))
@@ -392,7 +407,13 @@ impl ExpressionPredicate {
                         let end_idx = end
                             .as_ref()
                             .and_then(|e| self.eval_expr(e, chunk, row))
-                            .and_then(|v| if let Value::Int64(i) = v { Some(i as usize) } else { None })
+                            .and_then(|v| {
+                                if let Value::Int64(i) = v {
+                                    Some(i as usize)
+                                } else {
+                                    None
+                                }
+                            })
                             .unwrap_or(chars.len());
                         let sliced: String = chars
                             .get(start_idx..end_idx.min(chars.len()))
@@ -404,9 +425,17 @@ impl ExpressionPredicate {
                     _ => None,
                 }
             }
-            FilterExpression::Case { operand, when_clauses, else_clause } => {
-                self.eval_case(operand.as_deref(), when_clauses, else_clause.as_deref(), chunk, row)
-            }
+            FilterExpression::Case {
+                operand,
+                when_clauses,
+                else_clause,
+            } => self.eval_case(
+                operand.as_deref(),
+                when_clauses,
+                else_clause.as_deref(),
+                chunk,
+                row,
+            ),
             FilterExpression::Id(variable) => {
                 let col_idx = *self.variable_columns.get(variable)?;
                 let col = chunk.column(col_idx)?;
@@ -472,8 +501,7 @@ impl ExpressionPredicate {
 
                     if passes_filter {
                         // Apply the mapping expression
-                        if let Some(mapped) =
-                            self.eval_comprehension_expr(map_expr, item, variable)
+                        if let Some(mapped) = self.eval_comprehension_expr(map_expr, item, variable)
                         {
                             result.push(mapped);
                         }
@@ -494,18 +522,21 @@ impl ExpressionPredicate {
                 let start_node_id = col.get_node_id(row)?;
 
                 // Check if any matching edges exist
-                let exists = self.store.edges_from(start_node_id, *direction).any(|(_, edge_id)| {
-                    // Check edge type if specified
-                    if let Some(required_type) = edge_type {
-                        if let Some(actual_type) = self.store.edge_type(edge_id) {
-                            actual_type.as_ref() == required_type.as_str()
-                        } else {
-                            false
-                        }
-                    } else {
-                        true
-                    }
-                });
+                let exists =
+                    self.store
+                        .edges_from(start_node_id, *direction)
+                        .any(|(_, edge_id)| {
+                            // Check edge type if specified
+                            if let Some(required_type) = edge_type {
+                                if let Some(actual_type) = self.store.edge_type(edge_id) {
+                                    actual_type.as_ref() == required_type.as_str()
+                                } else {
+                                    false
+                                }
+                            } else {
+                                true
+                            }
+                        });
 
                 Some(Value::Bool(exists))
             }
@@ -532,7 +563,10 @@ impl ExpressionPredicate {
                 let val = self.eval_comprehension_expr(operand, item, variable);
                 self.eval_unary_op(*op, val)
             }
-            FilterExpression::Property { variable: var, property } if var == variable => {
+            FilterExpression::Property {
+                variable: var,
+                property,
+            } if var == variable => {
                 // Property access on the iteration variable
                 if let Value::Map(m) = item {
                     let key = PropertyKey::new(property.clone());
@@ -566,9 +600,13 @@ impl ExpressionPredicate {
             BinaryFilterOp::Eq => Some(Value::Bool(self.values_equal(left, right))),
             BinaryFilterOp::Ne => Some(Value::Bool(!self.values_equal(left, right))),
             BinaryFilterOp::Lt => self.compare_values(left, right).map(|c| Value::Bool(c < 0)),
-            BinaryFilterOp::Le => self.compare_values(left, right).map(|c| Value::Bool(c <= 0)),
+            BinaryFilterOp::Le => self
+                .compare_values(left, right)
+                .map(|c| Value::Bool(c <= 0)),
             BinaryFilterOp::Gt => self.compare_values(left, right).map(|c| Value::Bool(c > 0)),
-            BinaryFilterOp::Ge => self.compare_values(left, right).map(|c| Value::Bool(c >= 0)),
+            BinaryFilterOp::Ge => self
+                .compare_values(left, right)
+                .map(|c| Value::Bool(c >= 0)),
             // Arithmetic operators
             BinaryFilterOp::Add => self.eval_arithmetic(left, right, |a, b| a + b, |a, b| a + b),
             BinaryFilterOp::Sub => self.eval_arithmetic(left, right, |a, b| a - b, |a, b| a - b),
@@ -627,7 +665,13 @@ impl ExpressionPredicate {
         }
     }
 
-    fn eval_arithmetic<F1, F2>(&self, left: &Value, right: &Value, int_op: F1, float_op: F2) -> Option<Value>
+    fn eval_arithmetic<F1, F2>(
+        &self,
+        left: &Value,
+        right: &Value,
+        int_op: F1,
+        float_op: F2,
+    ) -> Option<Value>
     where
         F1: Fn(i64, i64) -> i64,
         F2: Fn(f64, f64) -> f64,
@@ -645,13 +689,21 @@ impl ExpressionPredicate {
         match (left, right) {
             (Value::Int64(a), Value::Int64(b)) if *b != 0 => Some(Value::Int64(a % b)),
             (Value::Float64(a), Value::Float64(b)) if *b != 0.0 => Some(Value::Float64(a % b)),
-            (Value::Int64(a), Value::Float64(b)) if *b != 0.0 => Some(Value::Float64(*a as f64 % b)),
+            (Value::Int64(a), Value::Float64(b)) if *b != 0.0 => {
+                Some(Value::Float64(*a as f64 % b))
+            }
             (Value::Float64(a), Value::Int64(b)) if *b != 0 => Some(Value::Float64(a % *b as f64)),
             _ => None,
         }
     }
 
-    fn eval_in_operator(&self, left: &Value, right: &FilterExpression, chunk: &DataChunk, row: usize) -> Option<Value> {
+    fn eval_in_operator(
+        &self,
+        left: &Value,
+        right: &FilterExpression,
+        chunk: &DataChunk,
+        row: usize,
+    ) -> Option<Value> {
         // Evaluate the right side - it should be a list
         let right_val = self.eval_expr(right, chunk, row)?;
         match right_val {
@@ -663,7 +715,13 @@ impl ExpressionPredicate {
         }
     }
 
-    fn eval_function(&self, name: &str, args: &[FilterExpression], chunk: &DataChunk, row: usize) -> Option<Value> {
+    fn eval_function(
+        &self,
+        name: &str,
+        args: &[FilterExpression],
+        chunk: &DataChunk,
+        row: usize,
+    ) -> Option<Value> {
         match name.to_lowercase().as_str() {
             "id" => {
                 if args.len() != 1 {
@@ -737,7 +795,9 @@ impl ExpressionPredicate {
                     return None;
                 }
                 let val = self.eval_expr(&args[0], chunk, row);
-                Some(Value::Bool(val.is_some() && !matches!(val, Some(Value::Null))))
+                Some(Value::Bool(
+                    val.is_some() && !matches!(val, Some(Value::Null)),
+                ))
             }
             "tostring" => {
                 if args.len() != 1 {
@@ -852,15 +912,17 @@ impl ExpressionPredicate {
                 let v = val?.as_bool()?;
                 Some(Value::Bool(!v))
             }
-            UnaryFilterOp::IsNull => Some(Value::Bool(val.is_none() || matches!(val, Some(Value::Null)))),
-            UnaryFilterOp::IsNotNull => Some(Value::Bool(val.is_some() && !matches!(val, Some(Value::Null)))),
-            UnaryFilterOp::Neg => {
-                match val? {
-                    Value::Int64(i) => Some(Value::Int64(-i)),
-                    Value::Float64(f) => Some(Value::Float64(-f)),
-                    _ => None,
-                }
-            }
+            UnaryFilterOp::IsNull => Some(Value::Bool(
+                val.is_none() || matches!(val, Some(Value::Null)),
+            )),
+            UnaryFilterOp::IsNotNull => Some(Value::Bool(
+                val.is_some() && !matches!(val, Some(Value::Null)),
+            )),
+            UnaryFilterOp::Neg => match val? {
+                Value::Int64(i) => Some(Value::Int64(-i)),
+                Value::Float64(f) => Some(Value::Float64(-f)),
+                _ => None,
+            },
         }
     }
 
@@ -1037,7 +1099,9 @@ mod tests {
         // Create predicate to test "Smith" =~ ".*Smith$" (should match)
         let predicate = ExpressionPredicate::new(
             FilterExpression::Binary {
-                left: Box::new(FilterExpression::Literal(Value::String("John Smith".into()))),
+                left: Box::new(FilterExpression::Literal(Value::String(
+                    "John Smith".into(),
+                ))),
                 op: BinaryFilterOp::Regex,
                 right: Box::new(FilterExpression::Literal(Value::String(".*Smith$".into()))),
             },
@@ -1128,8 +1192,14 @@ mod tests {
         // Create map {name: 'Alice', age: 30}
         let predicate = ExpressionPredicate::new(
             FilterExpression::Map(vec![
-                ("name".to_string(), FilterExpression::Literal(Value::String("Alice".into()))),
-                ("age".to_string(), FilterExpression::Literal(Value::Int64(30))),
+                (
+                    "name".to_string(),
+                    FilterExpression::Literal(Value::String("Alice".into())),
+                ),
+                (
+                    "age".to_string(),
+                    FilterExpression::Literal(Value::Int64(30)),
+                ),
             ]),
             variable_columns,
             store,
@@ -1140,7 +1210,10 @@ mod tests {
         assert!(result.is_some());
 
         if let Some(Value::Map(m)) = result {
-            assert_eq!(m.get(&PropertyKey::new("name")), Some(&Value::String("Alice".into())));
+            assert_eq!(
+                m.get(&PropertyKey::new("name")),
+                Some(&Value::String("Alice".into()))
+            );
             assert_eq!(m.get(&PropertyKey::new("age")), Some(&Value::Int64(30)));
         } else {
             panic!("Expected Map value");

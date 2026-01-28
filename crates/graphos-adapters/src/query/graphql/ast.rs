@@ -154,9 +154,7 @@ impl InputValue {
             InputValue::Boolean(b) => Value::Bool(*b),
             InputValue::Null => Value::Null,
             InputValue::Enum(s) => Value::String(s.clone().into()),
-            InputValue::List(items) => {
-                Value::List(items.iter().map(|i| i.to_value()).collect())
-            }
+            InputValue::List(items) => Value::List(items.iter().map(|i| i.to_value()).collect()),
             InputValue::Object(_) => Value::Null, // Objects not directly supported
             InputValue::Variable(_) => Value::Null, // Variables need runtime resolution
         }

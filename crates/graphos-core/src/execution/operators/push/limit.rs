@@ -132,8 +132,7 @@ impl PushOperator for SkipPushOperator {
             self.skipped = self.skip;
 
             let start = remaining_to_skip;
-            let selection =
-                SelectionVector::from_predicate(chunk_len, |i| i >= start);
+            let selection = SelectionVector::from_predicate(chunk_len, |i| i >= start);
             let passed = chunk.filter(&selection);
 
             sink.consume(passed)
@@ -188,8 +187,7 @@ impl PushOperator for SkipLimitPushOperator {
             // Partial skip
             self.skip.skipped = self.skip.skip;
             let start = remaining_to_skip;
-            let selection =
-                SelectionVector::from_predicate(chunk_len, |i| i >= start);
+            let selection = SelectionVector::from_predicate(chunk_len, |i| i >= start);
             let passed = chunk.filter(&selection);
 
             return self.limit.push(passed, sink);
@@ -231,7 +229,9 @@ mod tests {
         let mut limit = LimitPushOperator::new(10);
         let mut sink = CollectorSink::new();
 
-        limit.push(create_test_chunk(&[1, 2, 3]), &mut sink).unwrap();
+        limit
+            .push(create_test_chunk(&[1, 2, 3]), &mut sink)
+            .unwrap();
         limit.finalize(&mut sink).unwrap();
 
         assert_eq!(sink.row_count(), 3);
@@ -243,7 +243,9 @@ mod tests {
         let mut limit = LimitPushOperator::new(5);
         let mut sink = CollectorSink::new();
 
-        let should_continue = limit.push(create_test_chunk(&[1, 2, 3, 4, 5]), &mut sink).unwrap();
+        let should_continue = limit
+            .push(create_test_chunk(&[1, 2, 3, 4, 5]), &mut sink)
+            .unwrap();
         limit.finalize(&mut sink).unwrap();
 
         assert_eq!(sink.row_count(), 5);
@@ -256,7 +258,9 @@ mod tests {
         let mut limit = LimitPushOperator::new(3);
         let mut sink = CollectorSink::new();
 
-        let should_continue = limit.push(create_test_chunk(&[1, 2, 3, 4, 5]), &mut sink).unwrap();
+        let should_continue = limit
+            .push(create_test_chunk(&[1, 2, 3, 4, 5]), &mut sink)
+            .unwrap();
         limit.finalize(&mut sink).unwrap();
 
         assert_eq!(sink.row_count(), 3);
@@ -270,7 +274,9 @@ mod tests {
 
         limit.push(create_test_chunk(&[1, 2]), &mut sink).unwrap();
         limit.push(create_test_chunk(&[3, 4]), &mut sink).unwrap();
-        let should_continue = limit.push(create_test_chunk(&[5, 6, 7]), &mut sink).unwrap();
+        let should_continue = limit
+            .push(create_test_chunk(&[5, 6, 7]), &mut sink)
+            .unwrap();
         limit.finalize(&mut sink).unwrap();
 
         assert_eq!(sink.row_count(), 5);
@@ -307,7 +313,8 @@ mod tests {
         let mut skip = SkipPushOperator::new(2);
         let mut sink = CollectorSink::new();
 
-        skip.push(create_test_chunk(&[1, 2, 3, 4, 5]), &mut sink).unwrap();
+        skip.push(create_test_chunk(&[1, 2, 3, 4, 5]), &mut sink)
+            .unwrap();
         skip.finalize(&mut sink).unwrap();
 
         assert_eq!(sink.row_count(), 3); // 3, 4, 5
@@ -318,7 +325,8 @@ mod tests {
         let mut op = SkipLimitPushOperator::new(2, 3);
         let mut sink = CollectorSink::new();
 
-        op.push(create_test_chunk(&[1, 2, 3, 4, 5, 6, 7]), &mut sink).unwrap();
+        op.push(create_test_chunk(&[1, 2, 3, 4, 5, 6, 7]), &mut sink)
+            .unwrap();
         op.finalize(&mut sink).unwrap();
 
         assert_eq!(sink.row_count(), 3); // 3, 4, 5 (skip 1,2; limit 3)

@@ -90,13 +90,16 @@ impl CreateNodeOperator {
 impl Operator for CreateNodeOperator {
     fn next(&mut self) -> OperatorResult {
         // Get transaction context for versioned creation
-        let epoch = self.viewing_epoch.unwrap_or_else(|| self.store.current_epoch());
+        let epoch = self
+            .viewing_epoch
+            .unwrap_or_else(|| self.store.current_epoch());
         let tx = self.tx_id.unwrap_or(TxId::SYSTEM);
 
         if let Some(ref mut input) = self.input {
             // For each input row, create a node
             if let Some(chunk) = input.next()? {
-                let mut builder = DataChunkBuilder::with_capacity(&self.output_schema, chunk.row_count());
+                let mut builder =
+                    DataChunkBuilder::with_capacity(&self.output_schema, chunk.row_count());
 
                 for row in chunk.selected_indices() {
                     // Create the node with MVCC versioning
@@ -106,11 +109,10 @@ impl Operator for CreateNodeOperator {
                     // Set properties
                     for (prop_name, source) in &self.properties {
                         let value = match source {
-                            PropertySource::Column(col_idx) => {
-                                chunk.column(*col_idx)
-                                    .and_then(|c| c.get_value(row))
-                                    .unwrap_or(Value::Null)
-                            }
+                            PropertySource::Column(col_idx) => chunk
+                                .column(*col_idx)
+                                .and_then(|c| c.get_value(row))
+                                .unwrap_or(Value::Null),
                             PropertySource::Constant(v) => v.clone(),
                         };
                         self.store.set_node_property(node_id, prop_name, value);
@@ -119,10 +121,9 @@ impl Operator for CreateNodeOperator {
                     // Copy input columns to output
                     for col_idx in 0..chunk.column_count() {
                         if col_idx < self.output_column {
-                            if let (Some(src), Some(dst)) = (
-                                chunk.column(col_idx),
-                                builder.column_mut(col_idx),
-                            ) {
+                            if let (Some(src), Some(dst)) =
+                                (chunk.column(col_idx), builder.column_mut(col_idx))
+                            {
                                 if let Some(val) = src.get_value(row) {
                                     dst.push_value(val);
                                 } else {
@@ -157,7 +158,8 @@ impl Operator for CreateNodeOperator {
             // Set properties from constants only
             for (prop_name, source) in &self.properties {
                 if let PropertySource::Constant(value) = source {
-                    self.store.set_node_property(node_id, prop_name, value.clone());
+                    self.store
+                        .set_node_property(node_id, prop_name, value.clone());
                 }
             }
 
@@ -246,50 +248,68 @@ impl CreateEdgeOperator {
 impl Operator for CreateEdgeOperator {
     fn next(&mut self) -> OperatorResult {
         // Get transaction context for versioned creation
-        let epoch = self.viewing_epoch.unwrap_or_else(|| self.store.current_epoch());
+        let epoch = self
+            .viewing_epoch
+            .unwrap_or_else(|| self.store.current_epoch());
         let tx = self.tx_id.unwrap_or(TxId::SYSTEM);
 
         if let Some(chunk) = self.input.next()? {
-            let mut builder = DataChunkBuilder::with_capacity(&self.output_schema, chunk.row_count());
+            let mut builder =
+                DataChunkBuilder::with_capacity(&self.output_schema, chunk.row_count());
 
             for row in chunk.selected_indices() {
                 // Get source and target node IDs
-                let from_id = chunk.column(self.from_column)
+                let from_id = chunk
+                    .column(self.from_column)
                     .and_then(|c| c.get_value(row))
-                    .ok_or_else(|| OperatorError::ColumnNotFound(format!("from column {}", self.from_column)))?;
+                    .ok_or_else(|| {
+                        OperatorError::ColumnNotFound(format!("from column {}", self.from_column))
+                    })?;
 
-                let to_id = chunk.column(self.to_column)
+                let to_id = chunk
+                    .column(self.to_column)
                     .and_then(|c| c.get_value(row))
-                    .ok_or_else(|| OperatorError::ColumnNotFound(format!("to column {}", self.to_column)))?;
+                    .ok_or_else(|| {
+                        OperatorError::ColumnNotFound(format!("to column {}", self.to_column))
+                    })?;
 
                 // Extract node IDs
                 let from_node_id = match from_id {
                     Value::Int64(id) => NodeId(id as u64),
-                    _ => return Err(OperatorError::TypeMismatch {
-                        expected: "Int64 (node ID)".to_string(),
-                        found: format!("{from_id:?}"),
-                    }),
+                    _ => {
+                        return Err(OperatorError::TypeMismatch {
+                            expected: "Int64 (node ID)".to_string(),
+                            found: format!("{from_id:?}"),
+                        });
+                    }
                 };
 
                 let to_node_id = match to_id {
                     Value::Int64(id) => NodeId(id as u64),
-                    _ => return Err(OperatorError::TypeMismatch {
-                        expected: "Int64 (node ID)".to_string(),
-                        found: format!("{to_id:?}"),
-                    }),
+                    _ => {
+                        return Err(OperatorError::TypeMismatch {
+                            expected: "Int64 (node ID)".to_string(),
+                            found: format!("{to_id:?}"),
+                        });
+                    }
                 };
 
                 // Create the edge with MVCC versioning
-                let edge_id = self.store.create_edge_versioned(from_node_id, to_node_id, &self.edge_type, epoch, tx);
+                let edge_id = self.store.create_edge_versioned(
+                    from_node_id,
+                    to_node_id,
+                    &self.edge_type,
+                    epoch,
+                    tx,
+                );
 
                 // Set properties
                 for (prop_name, source) in &self.properties {
                     let value = match source {
-                        PropertySource::Column(col_idx) => {
-                            chunk.column(*col_idx)
-                                .and_then(|c| c.get_value(row))
-                                .unwrap_or(Value::Null)
-                        }
+                        PropertySource::Column(col_idx) => chunk
+                            .column(*col_idx)
+                            .and_then(|c| c.get_value(row))
+                            .unwrap_or(Value::Null),
                         PropertySource::Constant(v) => v.clone(),
                     };
                     self.store.set_edge_property(edge_id, prop_name, value);
@@ -297,10 +317,9 @@ impl Operator for CreateEdgeOperator {
 
                 // Copy input columns
                 for col_idx in 0..chunk.column_count() {
-                    if let (Some(src), Some(dst)) = (
-                        chunk.column(col_idx),
-                        builder.column_mut(col_idx),
-                    ) {
+                    if let (Some(src), Some(dst)) =
+                        (chunk.column(col_idx), builder.column_mut(col_idx))
+                    {
                         if let Some(val) = src.get_value(row) {
                             dst.push_value(val);
                         } else {
@@ -383,22 +402,29 @@ impl DeleteNodeOperator {
 impl Operator for DeleteNodeOperator {
     fn next(&mut self) -> OperatorResult {
         // Get transaction context for versioned deletion
-        let epoch = self.viewing_epoch.unwrap_or_else(|| self.store.current_epoch());
+        let epoch = self
+            .viewing_epoch
+            .unwrap_or_else(|| self.store.current_epoch());
 
         if let Some(chunk) = self.input.next()? {
             let mut deleted_count = 0;
 
             for row in chunk.selected_indices() {
-                let node_val = chunk.column(self.node_column)
+                let node_val = chunk
+                    .column(self.node_column)
                     .and_then(|c| c.get_value(row))
-                    .ok_or_else(|| OperatorError::ColumnNotFound(format!("node column {}", self.node_column)))?;
+                    .ok_or_else(|| {
+                        OperatorError::ColumnNotFound(format!("node column {}", self.node_column))
+                    })?;
 
                 let node_id = match node_val {
                     Value::Int64(id) => NodeId(id as u64),
-                    _ => return Err(OperatorError::TypeMismatch {
-                        expected: "Int64 (node ID)".to_string(),
-                        found: format!("{node_val:?}"),
-                    }),
+                    _ => {
+                        return Err(OperatorError::TypeMismatch {
+                            expected: "Int64 (node ID)".to_string(),
+                            found: format!("{node_val:?}"),
+                        });
+                    }
                 };
 
                 if self.detach {
@@ -480,22 +506,29 @@ impl DeleteEdgeOperator {
 impl Operator for DeleteEdgeOperator {
     fn next(&mut self) -> OperatorResult {
         // Get transaction context for versioned deletion
-        let epoch = self.viewing_epoch.unwrap_or_else(|| self.store.current_epoch());
+        let epoch = self
+            .viewing_epoch
+            .unwrap_or_else(|| self.store.current_epoch());
 
         if let Some(chunk) = self.input.next()? {
             let mut deleted_count = 0;
 
             for row in chunk.selected_indices() {
-                let edge_val = chunk.column(self.edge_column)
+                let edge_val = chunk
+                    .column(self.edge_column)
                     .and_then(|c| c.get_value(row))
-                    .ok_or_else(|| OperatorError::ColumnNotFound(format!("edge column {}", self.edge_column)))?;
+                    .ok_or_else(|| {
+                        OperatorError::ColumnNotFound(format!("edge column {}", self.edge_column))
+                    })?;
 
                 let edge_id = match edge_val {
                     Value::Int64(id) => EdgeId(id as u64),
-                    _ => return Err(OperatorError::TypeMismatch {
-                        expected: "Int64 (edge ID)".to_string(),
-                        found: format!("{edge_val:?}"),
-                    }),
+                    _ => {
+                        return Err(OperatorError::TypeMismatch {
+                            expected: "Int64 (edge ID)".to_string(),
+                            found: format!("{edge_val:?}"),
+                        });
+                    }
                 };
 
                 // Delete the edge with MVCC versioning
@@ -577,7 +610,7 @@ impl Operator for AddLabelOperator {
                         return Err(OperatorError::TypeMismatch {
                             expected: "Int64 (node ID)".to_string(),
                             found: format!("{node_val:?}"),
-                        })
+                        });
                     }
                 };
 
@@ -662,7 +695,7 @@ impl Operator for RemoveLabelOperator {
                         return Err(OperatorError::TypeMismatch {
                             expected: "Int64 (node ID)".to_string(),
                             found: format!("{node_val:?}"),
-                        })
+                        });
                     }
                 };
 
@@ -755,14 +788,18 @@ impl SetPropertyOperator {
 impl Operator for SetPropertyOperator {
     fn next(&mut self) -> OperatorResult {
         if let Some(chunk) = self.input.next()? {
-            let mut builder = DataChunkBuilder::with_capacity(&self.output_schema, chunk.row_count());
+            let mut builder =
+                DataChunkBuilder::with_capacity(&self.output_schema, chunk.row_count());
 
             for row in chunk.selected_indices() {
                 let entity_val = chunk
                     .column(self.entity_column)
                     .and_then(|c| c.get_value(row))
                     .ok_or_else(|| {
-                        OperatorError::ColumnNotFound(format!("entity column {}", self.entity_column))
+                        OperatorError::ColumnNotFound(format!(
+                            "entity column {}",
+                            self.entity_column
+                        ))
                     })?;
 
                 let entity_id = match entity_val {
@@ -771,35 +808,34 @@ impl Operator for SetPropertyOperator {
                         return Err(OperatorError::TypeMismatch {
                             expected: "Int64 (entity ID)".to_string(),
                             found: format!("{entity_val:?}"),
-                        })
+                        });
                     }
                 };
 
                 // Set all properties
                 for (prop_name, source) in &self.properties {
                     let value = match source {
-                        PropertySource::Column(col_idx) => {
-                            chunk
-                                .column(*col_idx)
-                                .and_then(|c| c.get_value(row))
-                                .unwrap_or(Value::Null)
-                        }
+                        PropertySource::Column(col_idx) => chunk
+                            .column(*col_idx)
+                            .and_then(|c| c.get_value(row))
+                            .unwrap_or(Value::Null),
                         PropertySource::Constant(v) => v.clone(),
                     };
 
                     if self.is_edge {
-                        self.store.set_edge_property(EdgeId(entity_id), prop_name, value);
+                        self.store
+                            .set_edge_property(EdgeId(entity_id), prop_name, value);
                     } else {
-                        self.store.set_node_property(NodeId(entity_id), prop_name, value);
+                        self.store
+                            .set_node_property(NodeId(entity_id), prop_name, value);
                     }
                 }
 
                 // Copy input columns to output
                 for col_idx in 0..chunk.column_count() {
-                    if let (Some(src), Some(dst)) = (
-                        chunk.column(col_idx),
-                        builder.column_mut(col_idx),
-                    ) {
+                    if let (Some(src), Some(dst)) =
+                        (chunk.column(col_idx), builder.column_mut(col_idx))
+                    {
                         if let Some(val) = src.get_value(row) {
                             dst.push_value(val);
                         } else {
@@ -828,8 +864,8 @@ impl Operator for SetPropertyOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::chunk::DataChunkBuilder;
     use crate::execution::DataChunk;
+    use crate::execution::chunk::DataChunkBuilder;
 
     fn create_test_store() -> Arc<LpgStore> {
         Arc::new(LpgStore::new())
@@ -843,7 +879,10 @@ mod tests {
             Arc::clone(&store),
             None,
             vec!["Person".to_string()],
-            vec![("name".to_string(), PropertySource::Constant(Value::String("Alice".into())))],
+            vec![(
+                "name".to_string(),
+                PropertySource::Constant(Value::String("Alice".into())),
+            )],
             vec![LogicalType::Int64],
             0,
         );
@@ -875,16 +914,24 @@ mod tests {
         let input_chunk = builder.finish();
 
         // Mock input operator
-        struct MockInput { chunk: Option<DataChunk> }
+        struct MockInput {
+            chunk: Option<DataChunk>,
+        }
         impl Operator for MockInput {
-            fn next(&mut self) -> OperatorResult { Ok(self.chunk.take()) }
+            fn next(&mut self) -> OperatorResult {
+                Ok(self.chunk.take())
+            }
             fn reset(&mut self) {}
-            fn name(&self) -> &'static str { "MockInput" }
+            fn name(&self) -> &'static str {
+                "MockInput"
+            }
         }
 
         let mut op = CreateEdgeOperator::new(
             Arc::clone(&store),
-            Box::new(MockInput { chunk: Some(input_chunk) }),
+            Box::new(MockInput {
+                chunk: Some(input_chunk),
+            }),
             0, // from column
             1, // to column
             "KNOWS".to_string(),
@@ -914,16 +961,24 @@ mod tests {
         builder.advance_row();
         let input_chunk = builder.finish();
 
-        struct MockInput { chunk: Option<DataChunk> }
+        struct MockInput {
+            chunk: Option<DataChunk>,
+        }
         impl Operator for MockInput {
-            fn next(&mut self) -> OperatorResult { Ok(self.chunk.take()) }
+            fn next(&mut self) -> OperatorResult {
+                Ok(self.chunk.take())
+            }
             fn reset(&mut self) {}
-            fn name(&self) -> &'static str { "MockInput" }
+            fn name(&self) -> &'static str {
+                "MockInput"
+            }
         }
 
         let mut op = DeleteNodeOperator::new(
             Arc::clone(&store),
-            Box::new(MockInput { chunk: Some(input_chunk) }),
+            Box::new(MockInput {
+                chunk: Some(input_chunk),
+            }),
             0,
             vec![LogicalType::Int64],
             false,

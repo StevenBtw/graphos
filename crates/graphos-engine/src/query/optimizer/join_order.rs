@@ -617,10 +617,7 @@ mod tests {
 
         let cost_model = CostModel::new();
         let mut card_estimator = CardinalityEstimator::new();
-        card_estimator.add_table_stats(
-            "Person",
-            super::super::cardinality::TableStats::new(1000),
-        );
+        card_estimator.add_table_stats("Person", super::super::cardinality::TableStats::new(1000));
 
         let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
         let plan = dpccp.optimize();
@@ -653,14 +650,8 @@ mod tests {
 
         let cost_model = CostModel::new();
         let mut card_estimator = CardinalityEstimator::new();
-        card_estimator.add_table_stats(
-            "Person",
-            super::super::cardinality::TableStats::new(1000),
-        );
-        card_estimator.add_table_stats(
-            "Company",
-            super::super::cardinality::TableStats::new(100),
-        );
+        card_estimator.add_table_stats("Person", super::super::cardinality::TableStats::new(1000));
+        card_estimator.add_table_stats("Company", super::super::cardinality::TableStats::new(100));
 
         let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
         let plan = dpccp.optimize();
@@ -715,14 +706,8 @@ mod tests {
 
         let cost_model = CostModel::new();
         let mut card_estimator = CardinalityEstimator::new();
-        card_estimator.add_table_stats(
-            "Person",
-            super::super::cardinality::TableStats::new(1000),
-        );
-        card_estimator.add_table_stats(
-            "Company",
-            super::super::cardinality::TableStats::new(100),
-        );
+        card_estimator.add_table_stats("Person", super::super::cardinality::TableStats::new(1000));
+        card_estimator.add_table_stats("Company", super::super::cardinality::TableStats::new(100));
 
         let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
         let plan = dpccp.optimize();
@@ -775,18 +760,9 @@ mod tests {
 
         let cost_model = CostModel::new();
         let mut card_estimator = CardinalityEstimator::new();
-        card_estimator.add_table_stats(
-            "Small",
-            super::super::cardinality::TableStats::new(100),
-        );
-        card_estimator.add_table_stats(
-            "Medium",
-            super::super::cardinality::TableStats::new(1000),
-        );
-        card_estimator.add_table_stats(
-            "Large",
-            super::super::cardinality::TableStats::new(10000),
-        );
+        card_estimator.add_table_stats("Small", super::super::cardinality::TableStats::new(100));
+        card_estimator.add_table_stats("Medium", super::super::cardinality::TableStats::new(1000));
+        card_estimator.add_table_stats("Large", super::super::cardinality::TableStats::new(10000));
 
         let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
         let plan = dpccp.optimize();
@@ -1014,10 +990,7 @@ mod tests {
 
         let cost_model = CostModel::new();
         let mut card_estimator = CardinalityEstimator::new();
-        card_estimator.add_table_stats(
-            "Center",
-            super::super::cardinality::TableStats::new(100),
-        );
+        card_estimator.add_table_stats("Center", super::super::cardinality::TableStats::new(100));
         card_estimator.add_table_stats("A", super::super::cardinality::TableStats::new(1000));
         card_estimator.add_table_stats("B", super::super::cardinality::TableStats::new(500));
         card_estimator.add_table_stats("C", super::super::cardinality::TableStats::new(200));
@@ -1254,10 +1227,7 @@ mod tests {
         let cost_model = CostModel::new();
         let mut card_estimator = CardinalityEstimator::new();
         card_estimator.add_table_stats("Tiny", super::super::cardinality::TableStats::new(10));
-        card_estimator.add_table_stats(
-            "Huge",
-            super::super::cardinality::TableStats::new(1000000),
-        );
+        card_estimator.add_table_stats("Huge", super::super::cardinality::TableStats::new(1000000));
 
         let mut dpccp = DPccp::new(&graph, &cost_model, &card_estimator);
         let plan = dpccp.optimize();

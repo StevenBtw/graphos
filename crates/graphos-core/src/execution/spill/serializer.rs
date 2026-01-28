@@ -128,9 +128,8 @@ pub fn deserialize_value<R: Read + ?Sized>(r: &mut R) -> std::io::Result<Value> 
             let len = u64::from_le_bytes(len_buf) as usize;
             let mut str_buf = vec![0u8; len];
             r.read_exact(&mut str_buf)?;
-            let s = String::from_utf8(str_buf).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-            })?;
+            let s = String::from_utf8(str_buf)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
             Ok(Value::String(Arc::from(s)))
         }
         TAG_BYTES => {
@@ -145,7 +144,9 @@ pub fn deserialize_value<R: Read + ?Sized>(r: &mut R) -> std::io::Result<Value> 
             let mut buf = [0u8; 8];
             r.read_exact(&mut buf)?;
             let micros = i64::from_le_bytes(buf);
-            Ok(Value::Timestamp(graphos_common::types::Timestamp::from_micros(micros)))
+            Ok(Value::Timestamp(
+                graphos_common::types::Timestamp::from_micros(micros),
+            ))
         }
         TAG_LIST => {
             let mut len_buf = [0u8; 8];
@@ -213,7 +214,10 @@ pub fn serialize_row<W: Write + ?Sized>(row: &[Value], w: &mut W) -> std::io::Re
 /// # Errors
 ///
 /// Returns an error if reading fails or column count mismatches.
-pub fn deserialize_row<R: Read + ?Sized>(r: &mut R, expected_columns: usize) -> std::io::Result<Vec<Value>> {
+pub fn deserialize_row<R: Read + ?Sized>(
+    r: &mut R,
+    expected_columns: usize,
+) -> std::io::Result<Vec<Value>> {
     let mut len_buf = [0u8; 8];
     r.read_exact(&mut len_buf)?;
     let num_columns = u64::from_le_bytes(len_buf) as usize;
@@ -262,8 +266,14 @@ mod tests {
     #[test]
     fn test_serialize_int64() {
         assert_eq!(roundtrip_value(Value::Int64(0)), Value::Int64(0));
-        assert_eq!(roundtrip_value(Value::Int64(i64::MAX)), Value::Int64(i64::MAX));
-        assert_eq!(roundtrip_value(Value::Int64(i64::MIN)), Value::Int64(i64::MIN));
+        assert_eq!(
+            roundtrip_value(Value::Int64(i64::MAX)),
+            Value::Int64(i64::MAX)
+        );
+        assert_eq!(
+            roundtrip_value(Value::Int64(i64::MIN)),
+            Value::Int64(i64::MIN)
+        );
         assert_eq!(roundtrip_value(Value::Int64(-42)), Value::Int64(-42));
     }
 

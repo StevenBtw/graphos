@@ -206,6 +206,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_priority_ordering() {
         assert!(priorities::SPILL_STAGING < priorities::QUERY_CACHE);
         assert!(priorities::QUERY_CACHE < priorities::INDEX_BUFFERS);

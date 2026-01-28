@@ -136,7 +136,10 @@ impl WalManager {
         if let Ok(entries) = fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
-                    if let Some(seq_str) = name.strip_prefix("wal_").and_then(|s| s.strip_suffix(".log")) {
+                    if let Some(seq_str) = name
+                        .strip_prefix("wal_")
+                        .and_then(|s| s.strip_suffix(".log"))
+                    {
                         if let Ok(seq) = seq_str.parse::<u64>() {
                             max_sequence = max_sequence.max(seq);
                         }
@@ -211,7 +214,10 @@ impl WalManager {
                     *self.last_sync.lock() = Instant::now();
                 }
             }
-            DurabilityMode::Batch { max_delay_ms, max_records } => {
+            DurabilityMode::Batch {
+                max_delay_ms,
+                max_records,
+            } => {
                 let records = self.records_since_sync.load(Ordering::Relaxed);
                 let elapsed = self.last_sync.lock().elapsed();
 
@@ -573,7 +579,10 @@ mod tests {
 
         // Should have multiple log files
         let files = wal.log_files().unwrap();
-        assert!(files.len() > 1, "Expected multiple log files after rotation");
+        assert!(
+            files.len() > 1,
+            "Expected multiple log files after rotation"
+        );
     }
 
     #[test]
@@ -586,7 +595,10 @@ mod tests {
             ..Default::default()
         };
         let wal = WalManager::with_config(dir.path().join("sync"), config).unwrap();
-        wal.log(&WalRecord::TxCommit { tx_id: TxId::new(1) }).unwrap();
+        wal.log(&WalRecord::TxCommit {
+            tx_id: TxId::new(1),
+        })
+        .unwrap();
 
         // Test NoSync mode
         let config = WalConfig {
@@ -597,7 +609,8 @@ mod tests {
         wal.log(&WalRecord::CreateNode {
             id: NodeId::new(1),
             labels: vec![],
-        }).unwrap();
+        })
+        .unwrap();
 
         // Test Batch mode
         let config = WalConfig {
@@ -612,7 +625,8 @@ mod tests {
             wal.log(&WalRecord::CreateNode {
                 id: NodeId::new(i),
                 labels: vec![],
-            }).unwrap();
+            })
+            .unwrap();
         }
     }
 
@@ -626,9 +640,13 @@ mod tests {
         wal.log(&WalRecord::CreateNode {
             id: NodeId::new(1),
             labels: vec!["Test".to_string()],
-        }).unwrap();
+        })
+        .unwrap();
 
-        wal.log(&WalRecord::TxCommit { tx_id: TxId::new(1) }).unwrap();
+        wal.log(&WalRecord::TxCommit {
+            tx_id: TxId::new(1),
+        })
+        .unwrap();
 
         // Create checkpoint
         wal.checkpoint(TxId::new(1), EpochId::new(10)).unwrap();

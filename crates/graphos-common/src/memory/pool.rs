@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_pool_with_reset() {
-        let pool: ObjectPool<Vec<u8>> = ObjectPool::with_reset(Vec::new, |v| v.clear());
+        let pool: ObjectPool<Vec<u8>> = ObjectPool::with_reset(Vec::new, Vec::clear);
 
         let mut obj = pool.get();
         obj.push(1);
@@ -303,8 +303,7 @@ mod tests {
         use std::sync::Arc;
         use std::thread;
 
-        let pool: Arc<ObjectPool<Vec<u8>>> =
-            Arc::new(ObjectPool::with_reset(Vec::new, |v| v.clear()));
+        let pool: Arc<ObjectPool<Vec<u8>>> = Arc::new(ObjectPool::with_reset(Vec::new, Vec::clear));
 
         let handles: Vec<_> = (0..4)
             .map(|_| {

@@ -13,10 +13,6 @@
 //! - [`statistics`] - Statistics collection for query optimization
 //! - [`storage`] - Storage utilities (Dictionary encoding, compression)
 
-#![warn(missing_docs)]
-#![warn(clippy::all)]
-#![warn(clippy::pedantic)]
-
 pub mod execution;
 pub mod graph;
 pub mod index;

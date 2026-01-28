@@ -6,8 +6,8 @@
 use super::morsel::Morsel;
 use crossbeam::deque::{Injector, Steal, Stealer, Worker};
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Work-stealing morsel scheduler.
 ///
@@ -161,9 +161,18 @@ impl std::fmt::Debug for MorselScheduler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MorselScheduler")
             .field("num_workers", &self.num_workers)
-            .field("active_morsels", &self.active_morsels.load(Ordering::Relaxed))
-            .field("total_submitted", &self.total_submitted.load(Ordering::Relaxed))
-            .field("submission_done", &self.submission_done.load(Ordering::Relaxed))
+            .field(
+                "active_morsels",
+                &self.active_morsels.load(Ordering::Relaxed),
+            )
+            .field(
+                "total_submitted",
+                &self.total_submitted.load(Ordering::Relaxed),
+            )
+            .field(
+                "submission_done",
+                &self.submission_done.load(Ordering::Relaxed),
+            )
             .field("done", &self.done.load(Ordering::Relaxed))
             .finish()
     }
@@ -221,7 +230,9 @@ impl WorkerHandle {
     /// Pushes a morsel to this worker's local queue.
     pub fn push_local(&self, morsel: Morsel) {
         self.local_queue.push(morsel);
-        self.scheduler.active_morsels.fetch_add(1, Ordering::Relaxed);
+        self.scheduler
+            .active_morsels
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Marks the current morsel as complete.

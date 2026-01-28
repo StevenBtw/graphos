@@ -4,7 +4,7 @@
 
 use crate::query::plan::{
     AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, BindOp, DistinctOp, FilterOp, JoinOp,
-    JoinType, LimitOp, LogicalExpression, LogicalOperator, LogicalPlan, Projection, ProjectOp,
+    JoinType, LimitOp, LogicalExpression, LogicalOperator, LogicalPlan, ProjectOp, Projection,
     SkipOp, SortKey, SortOp, SortOrder, TripleComponent, TripleScanOp, UnaryOp, UnionOp,
 };
 use graphos_adapters::query::sparql::{self, ast};
@@ -190,16 +190,15 @@ impl SparqlTranslator {
     fn translate_projection(&mut self, projection: &ast::Projection) -> Result<Vec<Projection>> {
         match projection {
             ast::Projection::Wildcard => Ok(Vec::new()), // Empty means select all
-            ast::Projection::Variables(vars) => {
-                vars.iter()
-                    .map(|pv| {
-                        Ok(Projection {
-                            expression: self.translate_expression(&pv.expression)?,
-                            alias: pv.alias.clone(),
-                        })
+            ast::Projection::Variables(vars) => vars
+                .iter()
+                .map(|pv| {
+                    Ok(Projection {
+                        expression: self.translate_expression(&pv.expression)?,
+                        alias: pv.alias.clone(),
                     })
-                    .collect()
-            }
+                })
+                .collect(),
         }
     }
 
@@ -246,7 +245,10 @@ impl SparqlTranslator {
                 }))
             }
 
-            ast::GraphPattern::Bind { expression, variable } => {
+            ast::GraphPattern::Bind {
+                expression,
+                variable,
+            } => {
                 let expr = self.translate_expression(expression)?;
                 Ok(LogicalOperator::Bind(BindOp {
                     expression: expr,
@@ -265,7 +267,11 @@ impl SparqlTranslator {
                 Ok(plan.root)
             }
 
-            ast::GraphPattern::Service { endpoint: _, pattern, silent: _ } => {
+            ast::GraphPattern::Service {
+                endpoint: _,
+                pattern,
+                silent: _,
+            } => {
                 // SERVICE queries remote endpoints - for now, translate the pattern
                 self.translate_graph_pattern(pattern)
             }
@@ -337,9 +343,9 @@ impl SparqlTranslator {
         match path {
             ast::PropertyPath::Predicate(iri) => Ok(TripleComponent::Iri(self.resolve_iri(iri))),
             ast::PropertyPath::Variable(name) => Ok(TripleComponent::Variable(name.clone())),
-            ast::PropertyPath::RdfType => {
-                Ok(TripleComponent::Iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type".to_string()))
-            }
+            ast::PropertyPath::RdfType => Ok(TripleComponent::Iri(
+                "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".to_string(),
+            )),
             // Complex property paths are not fully supported yet
             _ => Err(Error::Internal(
                 "Complex property paths not yet supported".to_string(),
@@ -351,17 +357,19 @@ impl SparqlTranslator {
         match expr {
             ast::Expression::Variable(name) => Ok(LogicalExpression::Variable(name.clone())),
 
-            ast::Expression::Iri(iri) => {
-                Ok(LogicalExpression::Literal(Value::String(
-                    self.resolve_iri(iri).into(),
-                )))
-            }
+            ast::Expression::Iri(iri) => Ok(LogicalExpression::Literal(Value::String(
+                self.resolve_iri(iri).into(),
+            ))),
 
             ast::Expression::Literal(lit) => {
                 Ok(LogicalExpression::Literal(self.literal_to_value(lit)))
             }
 
-            ast::Expression::Binary { left, operator, right } => {
+            ast::Expression::Binary {
+                left,
+                operator,
+                right,
+            } => {
                 let left = self.translate_expression(left)?;
                 let right = self.translate_expression(right)?;
                 let op = self.translate_binary_op(*operator);
@@ -381,7 +389,10 @@ impl SparqlTranslator {
                 })
             }
 
-            ast::Expression::FunctionCall { function, arguments } => {
+            ast::Expression::FunctionCall {
+                function,
+                arguments,
+            } => {
                 let name = self.translate_function_name(function);
                 let args = arguments
                     .iter()
@@ -469,13 +480,9 @@ impl SparqlTranslator {
                 })
             }
 
-            ast::Expression::Aggregate(agg) => {
-                self.translate_aggregate_expression(agg)
-            }
+            ast::Expression::Aggregate(agg) => self.translate_aggregate_expression(agg),
 
-            ast::Expression::Bracketed(inner) => {
-                self.translate_expression(inner)
-            }
+            ast::Expression::Bracketed(inner) => self.translate_expression(inner),
         }
     }
 
@@ -595,15 +602,22 @@ impl SparqlTranslator {
     ) -> Result<Option<AggregateExpr>> {
         if let ast::Expression::Aggregate(agg) = expr {
             let (func, expr_inner, distinct) = match agg {
-                ast::AggregateExpression::Count { distinct, expression } => {
-                    (AggregateFunction::Count, expression.as_ref().map(|e| e.as_ref()), *distinct)
-                }
-                ast::AggregateExpression::Sum { distinct, expression } => {
-                    (AggregateFunction::Sum, Some(expression.as_ref()), *distinct)
-                }
-                ast::AggregateExpression::Average { distinct, expression } => {
-                    (AggregateFunction::Avg, Some(expression.as_ref()), *distinct)
-                }
+                ast::AggregateExpression::Count {
+                    distinct,
+                    expression,
+                } => (
+                    AggregateFunction::Count,
+                    expression.as_ref().map(|e| e.as_ref()),
+                    *distinct,
+                ),
+                ast::AggregateExpression::Sum {
+                    distinct,
+                    expression,
+                } => (AggregateFunction::Sum, Some(expression.as_ref()), *distinct),
+                ast::AggregateExpression::Average {
+                    distinct,
+                    expression,
+                } => (AggregateFunction::Avg, Some(expression.as_ref()), *distinct),
                 ast::AggregateExpression::Minimum { expression } => {
                     (AggregateFunction::Min, Some(expression.as_ref()), false)
                 }
@@ -614,9 +628,15 @@ impl SparqlTranslator {
                     // Map SAMPLE to Collect for now
                     (AggregateFunction::Collect, Some(expression.as_ref()), false)
                 }
-                ast::AggregateExpression::GroupConcat { distinct, expression, .. } => {
-                    (AggregateFunction::Collect, Some(expression.as_ref()), *distinct)
-                }
+                ast::AggregateExpression::GroupConcat {
+                    distinct,
+                    expression,
+                    ..
+                } => (
+                    AggregateFunction::Collect,
+                    Some(expression.as_ref()),
+                    *distinct,
+                ),
             };
 
             let expression = if let Some(e) = expr_inner {
@@ -636,11 +656,7 @@ impl SparqlTranslator {
         }
     }
 
-    fn join_patterns(
-        &self,
-        left: LogicalOperator,
-        right: LogicalOperator,
-    ) -> LogicalOperator {
+    fn join_patterns(&self, left: LogicalOperator, right: LogicalOperator) -> LogicalOperator {
         if matches!(left, LogicalOperator::Empty) {
             return right;
         }

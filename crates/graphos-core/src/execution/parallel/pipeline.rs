@@ -3,16 +3,16 @@
 //! Executes push-based pipelines in parallel using work-stealing schedulers
 //! and per-worker operator instances.
 
-use super::morsel::{compute_morsel_size, DEFAULT_MORSEL_SIZE};
+use super::morsel::{DEFAULT_MORSEL_SIZE, compute_morsel_size};
 use super::scheduler::MorselScheduler;
 use super::source::ParallelSource;
 use crate::execution::chunk::DataChunk;
 use crate::execution::operators::OperatorError;
-use crate::execution::pipeline::{ChunkCollector, PushOperator, Sink, DEFAULT_CHUNK_SIZE};
+use crate::execution::pipeline::{ChunkCollector, DEFAULT_CHUNK_SIZE, PushOperator, Sink};
 use graphos_common::memory::buffer::PressureLevel;
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 /// Factory for creating per-worker operator chains.
@@ -489,9 +489,9 @@ mod tests {
 
     impl PushOperator for EvenFilterOp {
         fn push(&mut self, chunk: DataChunk, sink: &mut dyn Sink) -> Result<bool, OperatorError> {
-            let col = chunk.column(0).ok_or_else(|| {
-                OperatorError::Execution("Missing column".to_string())
-            })?;
+            let col = chunk
+                .column(0)
+                .ok_or_else(|| OperatorError::Execution("Missing column".to_string()))?;
 
             let mut filtered = ValueVector::new();
             for i in 0..chunk.len() {
@@ -543,9 +543,8 @@ mod tests {
     #[test]
     fn test_parallel_pipeline_passthrough() {
         let source = Arc::new(RangeSource::new(100));
-        let factory = Arc::new(
-            CloneableOperatorFactory::new().with_operator(|| Box::new(PassThroughOp)),
-        );
+        let factory =
+            Arc::new(CloneableOperatorFactory::new().with_operator(|| Box::new(PassThroughOp)));
         let config = ParallelPipelineConfig::for_testing();
 
         let pipeline = ParallelPipeline::new(source, factory, config);
@@ -560,9 +559,8 @@ mod tests {
     #[test]
     fn test_parallel_pipeline_filter() {
         let source = Arc::new(RangeSource::new(100));
-        let factory = Arc::new(
-            CloneableOperatorFactory::new().with_operator(|| Box::new(EvenFilterOp)),
-        );
+        let factory =
+            Arc::new(CloneableOperatorFactory::new().with_operator(|| Box::new(EvenFilterOp)));
         let config = ParallelPipelineConfig::for_testing();
 
         let pipeline = ParallelPipeline::new(source, factory, config);

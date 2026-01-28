@@ -30,15 +30,15 @@
 //! let result = dijkstra(&store, NodeId::new(0), Some("weight"));
 //! ```
 
-mod traits;
-mod traversal;
-mod components;
-mod shortest_path;
 mod centrality;
 mod community;
-mod mst;
+mod components;
 mod flow;
+mod mst;
+mod shortest_path;
 mod structure;
+mod traits;
+mod traversal;
 
 // Core traits
 pub use traits::{
@@ -50,58 +50,45 @@ pub use traversal::{bfs, bfs_layers, bfs_with_visitor, dfs, dfs_all, dfs_with_vi
 
 // Component algorithms
 pub use components::{
-    connected_components, connected_component_count,
-    is_dag,
-    strongly_connected_components, strongly_connected_component_count,
-    topological_sort,
-    UnionFind,
+    UnionFind, connected_component_count, connected_components, is_dag,
+    strongly_connected_component_count, strongly_connected_components, topological_sort,
 };
 
 // Shortest path algorithms
 pub use shortest_path::{
-    astar, bellman_ford, dijkstra, dijkstra_path, floyd_warshall,
-    BellmanFordResult, DijkstraResult, FloydWarshallResult,
+    BellmanFordResult, DijkstraResult, FloydWarshallResult, astar, bellman_ford, dijkstra,
+    dijkstra_path, floyd_warshall,
 };
 
 // Centrality algorithms
 pub use centrality::{
-    betweenness_centrality, closeness_centrality, degree_centrality,
-    degree_centrality_normalized, pagerank, DegreeCentralityResult,
+    DegreeCentralityResult, betweenness_centrality, closeness_centrality, degree_centrality,
+    degree_centrality_normalized, pagerank,
 };
 
 // Community detection algorithms
-pub use community::{
-    label_propagation, louvain, community_count, LouvainResult,
-};
+pub use community::{LouvainResult, community_count, label_propagation, louvain};
 
 // Minimum Spanning Tree algorithms
-pub use mst::{kruskal, prim, MstResult};
+pub use mst::{MstResult, kruskal, prim};
 
 // Network Flow algorithms
-pub use flow::{max_flow, min_cost_max_flow, MaxFlowResult, MinCostFlowResult};
+pub use flow::{MaxFlowResult, MinCostFlowResult, max_flow, min_cost_max_flow};
 
 // Structure analysis algorithms
-pub use structure::{
-    articulation_points, bridges, k_core, kcore_decomposition, KCoreResult,
-};
+pub use structure::{KCoreResult, articulation_points, bridges, k_core, kcore_decomposition};
 
 // Algorithm wrappers (for future registry integration)
-pub use traversal::{BfsAlgorithm, DfsAlgorithm};
-pub use components::{
-    ConnectedComponentsAlgorithm,
-    StronglyConnectedComponentsAlgorithm,
-    TopologicalSortAlgorithm,
-};
-pub use shortest_path::{
-    BellmanFordAlgorithm, DijkstraAlgorithm, FloydWarshallAlgorithm,
-};
 pub use centrality::{
-    BetweennessCentralityAlgorithm, ClosenessCentralityAlgorithm,
-    DegreeCentralityAlgorithm, PageRankAlgorithm,
+    BetweennessCentralityAlgorithm, ClosenessCentralityAlgorithm, DegreeCentralityAlgorithm,
+    PageRankAlgorithm,
 };
-pub use community::{
-    LabelPropagationAlgorithm, LouvainAlgorithm,
+pub use community::{LabelPropagationAlgorithm, LouvainAlgorithm};
+pub use components::{
+    ConnectedComponentsAlgorithm, StronglyConnectedComponentsAlgorithm, TopologicalSortAlgorithm,
 };
-pub use mst::{KruskalAlgorithm, PrimAlgorithm};
 pub use flow::{MaxFlowAlgorithm, MinCostFlowAlgorithm};
+pub use mst::{KruskalAlgorithm, PrimAlgorithm};
+pub use shortest_path::{BellmanFordAlgorithm, DijkstraAlgorithm, FloydWarshallAlgorithm};
 pub use structure::{ArticulationPointsAlgorithm, BridgesAlgorithm, KCoreAlgorithm};
+pub use traversal::{BfsAlgorithm, DfsAlgorithm};

@@ -114,16 +114,14 @@ impl Operator for ProjectOperator {
                 }
                 ProjectExpr::PropertyAccess { column, property } => {
                     // Access property from node/edge in the specified column
-                    let input_col = input.column(*column).ok_or_else(|| {
-                        OperatorError::ColumnNotFound(format!("Column {column}"))
-                    })?;
+                    let input_col = input
+                        .column(*column)
+                        .ok_or_else(|| OperatorError::ColumnNotFound(format!("Column {column}")))?;
 
                     let output_col = output.column_mut(i).unwrap();
 
                     let store = self.store.as_ref().ok_or_else(|| {
-                        OperatorError::Execution(
-                            "Store required for property access".to_string(),
-                        )
+                        OperatorError::Execution("Store required for property access".to_string())
                     })?;
 
                     // Extract property for each row

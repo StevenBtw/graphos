@@ -147,13 +147,12 @@ impl<'a> Parser<'a> {
         let resources = self.parse_describe_resources()?;
         let dataset = self.parse_dataset_clause()?;
 
-        let where_clause = if self.current.kind == TokenKind::Where
-            || self.current.kind == TokenKind::LeftBrace
-        {
-            Some(self.parse_where_clause()?)
-        } else {
-            None
-        };
+        let where_clause =
+            if self.current.kind == TokenKind::Where || self.current.kind == TokenKind::LeftBrace {
+                Some(self.parse_where_clause()?)
+            } else {
+                None
+            };
 
         Ok(DescribeQuery {
             resources,
@@ -208,8 +207,7 @@ impl<'a> Parser<'a> {
         }
 
         let mut variables = Vec::new();
-        while self.current.kind == TokenKind::Variable
-            || self.current.kind == TokenKind::LeftParen
+        while self.current.kind == TokenKind::Variable || self.current.kind == TokenKind::LeftParen
         {
             variables.push(self.parse_projection_variable()?);
         }
@@ -358,9 +356,7 @@ impl<'a> Parser<'a> {
                     variable,
                 })
             }
-            TokenKind::Values => {
-                self.parse_inline_data()
-            }
+            TokenKind::Values => self.parse_inline_data(),
             TokenKind::LeftBrace => {
                 // Nested group or subquery
                 let pattern = self.parse_group_or_subquery()?;
@@ -641,7 +637,8 @@ impl<'a> Parser<'a> {
             }
 
             // Create an anonymous blank node as subject
-            let blank_subject = TripleTerm::BlankNode(BlankNode::Labeled(format!("_:b{}", triples.len())));
+            let blank_subject =
+                TripleTerm::BlankNode(BlankNode::Labeled(format!("_:b{}", triples.len())));
             self.parse_property_list_not_empty(&blank_subject, triples)?;
             self.expect(TokenKind::RightBracket)?;
 
@@ -871,8 +868,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::By)?;
 
         let mut conditions = Vec::new();
-        while self.current.kind == TokenKind::Variable
-            || self.current.kind == TokenKind::LeftParen
+        while self.current.kind == TokenKind::Variable || self.current.kind == TokenKind::LeftParen
         {
             conditions.push(self.parse_group_condition()?);
         }
@@ -1231,15 +1227,58 @@ impl<'a> Parser<'a> {
         // Check for keywords that can be function names
         matches!(
             self.current.text.to_uppercase().as_str(),
-            "STR" | "LANG" | "LANGMATCHES" | "DATATYPE" | "BOUND" | "IRI" | "URI"
-                | "BNODE" | "RAND" | "ABS" | "CEIL" | "FLOOR" | "ROUND" | "CONCAT"
-                | "STRLEN" | "UCASE" | "LCASE" | "ENCODE_FOR_URI" | "CONTAINS"
-                | "STRSTARTS" | "STRENDS" | "STRBEFORE" | "STRAFTER" | "YEAR"
-                | "MONTH" | "DAY" | "HOURS" | "MINUTES" | "SECONDS" | "TIMEZONE"
-                | "TZ" | "NOW" | "UUID" | "STRUUID" | "MD5" | "SHA1" | "SHA256"
-                | "SHA384" | "SHA512" | "COALESCE" | "IF" | "STRLANG" | "STRDT"
-                | "SAMETERM" | "ISIRI" | "ISURI" | "ISBLANK" | "ISLITERAL"
-                | "ISNUMERIC" | "REGEX" | "SUBSTR" | "REPLACE"
+            "STR"
+                | "LANG"
+                | "LANGMATCHES"
+                | "DATATYPE"
+                | "BOUND"
+                | "IRI"
+                | "URI"
+                | "BNODE"
+                | "RAND"
+                | "ABS"
+                | "CEIL"
+                | "FLOOR"
+                | "ROUND"
+                | "CONCAT"
+                | "STRLEN"
+                | "UCASE"
+                | "LCASE"
+                | "ENCODE_FOR_URI"
+                | "CONTAINS"
+                | "STRSTARTS"
+                | "STRENDS"
+                | "STRBEFORE"
+                | "STRAFTER"
+                | "YEAR"
+                | "MONTH"
+                | "DAY"
+                | "HOURS"
+                | "MINUTES"
+                | "SECONDS"
+                | "TIMEZONE"
+                | "TZ"
+                | "NOW"
+                | "UUID"
+                | "STRUUID"
+                | "MD5"
+                | "SHA1"
+                | "SHA256"
+                | "SHA384"
+                | "SHA512"
+                | "COALESCE"
+                | "IF"
+                | "STRLANG"
+                | "STRDT"
+                | "SAMETERM"
+                | "ISIRI"
+                | "ISURI"
+                | "ISBLANK"
+                | "ISLITERAL"
+                | "ISNUMERIC"
+                | "REGEX"
+                | "SUBSTR"
+                | "REPLACE"
         )
     }
 
@@ -1687,10 +1726,13 @@ impl<'a> Parser<'a> {
         Error::Query(
             QueryError::new(
                 QueryErrorKind::Syntax,
-                format!("{} at line {}, column {}", message, self.current.span.line, self.current.span.column),
+                format!(
+                    "{} at line {}, column {}",
+                    message, self.current.span.line, self.current.span.column
+                ),
             )
             .with_span(self.current.span)
-            .with_source(self.source.to_string())
+            .with_source(self.source.to_string()),
         )
     }
 }
@@ -1813,7 +1855,8 @@ mod tests {
 
     #[test]
     fn test_bind() {
-        let query = parse("SELECT ?x ?doubled WHERE { ?x ?y ?z BIND(?z * 2 AS ?doubled) }").unwrap();
+        let query =
+            parse("SELECT ?x ?doubled WHERE { ?x ?y ?z BIND(?z * 2 AS ?doubled) }").unwrap();
         assert!(matches!(query.query_form, QueryForm::Select(_)));
     }
 

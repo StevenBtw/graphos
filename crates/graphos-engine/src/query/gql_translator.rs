@@ -201,10 +201,7 @@ impl GqlTranslator {
 
     /// Builds return items for an aggregate query.
     #[allow(dead_code)]
-    fn build_aggregate_return_items(
-        &self,
-        items: &[ast::ReturnItem],
-    ) -> Result<Vec<ReturnItem>> {
+    fn build_aggregate_return_items(&self, items: &[ast::ReturnItem]) -> Result<Vec<ReturnItem>> {
         let mut return_items = Vec::new();
         let mut agg_idx = 0;
 
@@ -349,7 +346,9 @@ impl GqlTranslator {
         // This is typically used as: MATCH (n:Label) DELETE n
 
         if delete.variables.is_empty() {
-            return Err(Error::Internal("DELETE requires at least one variable".to_string()));
+            return Err(Error::Internal(
+                "DELETE requires at least one variable".to_string(),
+            ));
         }
 
         // For now, we only support deleting nodes (not edges directly)
@@ -385,7 +384,9 @@ impl GqlTranslator {
         // For standalone SET, we error - it should be part of a query.
 
         if set.assignments.is_empty() {
-            return Err(Error::Internal("SET requires at least one assignment".to_string()));
+            return Err(Error::Internal(
+                "SET requires at least one assignment".to_string(),
+            ));
         }
 
         // Group assignments by variable
@@ -459,9 +460,9 @@ impl GqlTranslator {
 
                 Ok(LogicalPlan::new(ret))
             }
-            ast::Pattern::Path(_) => Err(Error::Internal(
-                "Path INSERT not yet supported".to_string(),
-            )),
+            ast::Pattern::Path(_) => {
+                Err(Error::Internal("Path INSERT not yet supported".to_string()))
+            }
         }
     }
 
@@ -594,7 +595,10 @@ impl GqlTranslator {
     }
 
     /// Translates a subquery to a logical operator (without Return).
-    fn translate_subquery_to_operator(&self, query: &ast::QueryStatement) -> Result<LogicalOperator> {
+    fn translate_subquery_to_operator(
+        &self,
+        query: &ast::QueryStatement,
+    ) -> Result<LogicalOperator> {
         let mut plan = LogicalOperator::Empty;
 
         for match_clause in &query.match_clauses {
@@ -1202,12 +1206,18 @@ mod tests {
 
     #[test]
     fn test_to_aggregate_function() {
-        assert_eq!(to_aggregate_function("COUNT"), Some(AggregateFunction::Count));
+        assert_eq!(
+            to_aggregate_function("COUNT"),
+            Some(AggregateFunction::Count)
+        );
         assert_eq!(to_aggregate_function("sum"), Some(AggregateFunction::Sum));
         assert_eq!(to_aggregate_function("Avg"), Some(AggregateFunction::Avg));
         assert_eq!(to_aggregate_function("min"), Some(AggregateFunction::Min));
         assert_eq!(to_aggregate_function("MAX"), Some(AggregateFunction::Max));
-        assert_eq!(to_aggregate_function("collect"), Some(AggregateFunction::Collect));
+        assert_eq!(
+            to_aggregate_function("collect"),
+            Some(AggregateFunction::Collect)
+        );
         assert_eq!(to_aggregate_function("UNKNOWN"), None);
     }
 
@@ -1233,30 +1243,87 @@ mod tests {
     fn test_binary_op_translation() {
         let translator = GqlTranslator::new();
 
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Eq), BinaryOp::Eq);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Ne), BinaryOp::Ne);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Lt), BinaryOp::Lt);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Le), BinaryOp::Le);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Gt), BinaryOp::Gt);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Ge), BinaryOp::Ge);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::And), BinaryOp::And);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Or), BinaryOp::Or);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Add), BinaryOp::Add);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Sub), BinaryOp::Sub);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Mul), BinaryOp::Mul);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Div), BinaryOp::Div);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Mod), BinaryOp::Mod);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::Like), BinaryOp::Like);
-        assert_eq!(translator.translate_binary_op(ast::BinaryOp::In), BinaryOp::In);
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Eq),
+            BinaryOp::Eq
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Ne),
+            BinaryOp::Ne
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Lt),
+            BinaryOp::Lt
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Le),
+            BinaryOp::Le
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Gt),
+            BinaryOp::Gt
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Ge),
+            BinaryOp::Ge
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::And),
+            BinaryOp::And
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Or),
+            BinaryOp::Or
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Add),
+            BinaryOp::Add
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Sub),
+            BinaryOp::Sub
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Mul),
+            BinaryOp::Mul
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Div),
+            BinaryOp::Div
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Mod),
+            BinaryOp::Mod
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::Like),
+            BinaryOp::Like
+        );
+        assert_eq!(
+            translator.translate_binary_op(ast::BinaryOp::In),
+            BinaryOp::In
+        );
     }
 
     #[test]
     fn test_unary_op_translation() {
         let translator = GqlTranslator::new();
 
-        assert_eq!(translator.translate_unary_op(ast::UnaryOp::Not), UnaryOp::Not);
-        assert_eq!(translator.translate_unary_op(ast::UnaryOp::Neg), UnaryOp::Neg);
-        assert_eq!(translator.translate_unary_op(ast::UnaryOp::IsNull), UnaryOp::IsNull);
-        assert_eq!(translator.translate_unary_op(ast::UnaryOp::IsNotNull), UnaryOp::IsNotNull);
+        assert_eq!(
+            translator.translate_unary_op(ast::UnaryOp::Not),
+            UnaryOp::Not
+        );
+        assert_eq!(
+            translator.translate_unary_op(ast::UnaryOp::Neg),
+            UnaryOp::Neg
+        );
+        assert_eq!(
+            translator.translate_unary_op(ast::UnaryOp::IsNull),
+            UnaryOp::IsNull
+        );
+        assert_eq!(
+            translator.translate_unary_op(ast::UnaryOp::IsNotNull),
+            UnaryOp::IsNotNull
+        );
     }
 }

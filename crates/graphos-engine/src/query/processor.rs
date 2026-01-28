@@ -561,10 +561,7 @@ fn substitute_in_expression(expr: &mut LogicalExpression, params: &QueryParams) 
             if let Some(value) = params.get(name) {
                 *expr = LogicalExpression::Literal(value.clone());
             } else {
-                return Err(Error::Internal(format!(
-                    "Missing parameter: ${}",
-                    name
-                )));
+                return Err(Error::Internal(format!("Missing parameter: ${}", name)));
             }
         }
         LogicalExpression::Binary { left, right, .. } => {

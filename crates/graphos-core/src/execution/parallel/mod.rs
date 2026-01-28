@@ -64,19 +64,19 @@ mod source;
 
 // Re-export main types
 pub use merge::{
-    concat_parallel_results, merge_distinct_results, merge_sorted_chunks, merge_sorted_runs,
-    rows_to_chunks, MergeableAccumulator, MergeableOperator, SortKey,
+    MergeableAccumulator, MergeableOperator, SortKey, concat_parallel_results,
+    merge_distinct_results, merge_sorted_chunks, merge_sorted_runs, rows_to_chunks,
 };
 pub use morsel::{
-    compute_morsel_size, compute_morsel_size_with_base, generate_adaptive_morsels, generate_morsels,
-    Morsel, CRITICAL_PRESSURE_MORSEL_SIZE, DEFAULT_MORSEL_SIZE, HIGH_PRESSURE_MORSEL_SIZE,
-    MIN_MORSEL_SIZE, MODERATE_PRESSURE_MORSEL_SIZE,
+    CRITICAL_PRESSURE_MORSEL_SIZE, DEFAULT_MORSEL_SIZE, HIGH_PRESSURE_MORSEL_SIZE, MIN_MORSEL_SIZE,
+    MODERATE_PRESSURE_MORSEL_SIZE, Morsel, compute_morsel_size, compute_morsel_size_with_base,
+    generate_adaptive_morsels, generate_morsels,
 };
 pub use pipeline::{
     CloneableOperatorFactory, CollectorSink, OperatorChainFactory, ParallelPipeline,
     ParallelPipelineConfig, ParallelPipelineResult,
 };
 pub use scheduler::{MorselScheduler, WorkerHandle};
-pub use source::{ParallelChunkSource, ParallelSource, ParallelVectorSource, RangeSource};
 #[cfg(feature = "rdf")]
 pub use source::ParallelTripleScanSource;
+pub use source::{ParallelChunkSource, ParallelSource, ParallelVectorSource, RangeSource};

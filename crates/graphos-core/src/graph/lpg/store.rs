@@ -10,8 +10,8 @@ use graphos_common::mvcc::VersionChain;
 use graphos_common::types::{EdgeId, EpochId, NodeId, PropertyKey, TxId, Value};
 use graphos_common::utils::hash::{FxHashMap, FxHashSet};
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Configuration for the LPG store.
 #[derive(Debug, Clone)]
@@ -153,12 +153,7 @@ impl LpgStore {
     }
 
     /// Creates a new node with the given labels within a transaction context.
-    pub fn create_node_versioned(
-        &self,
-        labels: &[&str],
-        epoch: EpochId,
-        tx_id: TxId,
-    ) -> NodeId {
+    pub fn create_node_versioned(&self, labels: &[&str], epoch: EpochId, tx_id: TxId) -> NodeId {
         let id = NodeId::new(self.next_node_id.fetch_add(1, Ordering::Relaxed));
 
         let mut record = NodeRecord::new(id, epoch);
@@ -445,7 +440,9 @@ impl LpgStore {
 
         // Add to node_labels map
         let mut node_labels = self.node_labels.write();
-        let label_set = node_labels.entry(node_id).or_insert_with(FxHashSet::default);
+        let label_set = node_labels
+            .entry(node_id)
+            .or_insert_with(FxHashSet::default);
 
         if label_set.contains(&label_id) {
             return false; // Already has this label
@@ -550,13 +547,9 @@ impl LpgStore {
             .read()
             .iter()
             .filter_map(|(id, chain)| {
-                chain.visible_at(epoch).and_then(|r| {
-                    if !r.is_deleted() {
-                        Some(*id)
-                    } else {
-                        None
-                    }
-                })
+                chain
+                    .visible_at(epoch)
+                    .and_then(|r| if !r.is_deleted() { Some(*id) } else { None })
             })
             .collect()
     }
@@ -931,8 +924,8 @@ impl LpgStore {
                     0.0
                 };
 
-                let label_stats = LabelStatistics::new(node_count)
-                    .with_degrees(avg_out_degree, avg_out_degree);
+                let label_stats =
+                    LabelStatistics::new(node_count).with_degrees(avg_out_degree, avg_out_degree);
 
                 stats.update_label(label_name.as_ref(), label_stats);
             }
@@ -977,7 +970,9 @@ impl LpgStore {
     /// Estimates average degree for an edge type.
     #[must_use]
     pub fn estimate_avg_degree(&self, edge_type: &str, outgoing: bool) -> f64 {
-        self.statistics.read().estimate_avg_degree(edge_type, outgoing)
+        self.statistics
+            .read()
+            .estimate_avg_degree(edge_type, outgoing)
     }
 
     // === Internal Helpers ===
@@ -1079,13 +1074,7 @@ impl LpgStore {
     /// Creates an edge with a specific ID during recovery.
     ///
     /// This is used for WAL recovery to restore edges with their original IDs.
-    pub fn create_edge_with_id(
-        &self,
-        id: EdgeId,
-        src: NodeId,
-        dst: NodeId,
-        edge_type: &str,
-    ) {
+    pub fn create_edge_with_id(&self, id: EdgeId, src: NodeId, dst: NodeId, edge_type: &str) {
         let epoch = self.current_epoch();
         let type_id = self.get_or_create_edge_type_id(edge_type);
 

@@ -11,20 +11,20 @@ use std::sync::Arc;
 
 use graphos_common::types::{LogicalType, Value};
 use graphos_common::utils::error::{Error, Result};
+use graphos_core::execution::DataChunk;
+use graphos_core::execution::operators::JoinType;
 use graphos_core::execution::operators::{
     BinaryFilterOp, FilterExpression, FilterOperator, HashAggregateOperator, LimitOperator,
     NestedLoopJoinOperator, Operator, OperatorError, Predicate, SimpleAggregateOperator,
     SkipOperator, SortOperator, UnaryFilterOp,
 };
-use graphos_core::execution::DataChunk;
-use graphos_core::execution::operators::JoinType;
 use graphos_core::graph::rdf::{Literal, RdfStore, Term, Triple, TriplePattern};
 
 use crate::query::plan::{
     AggregateFunction as LogicalAggregateFunction, AggregateOp, FilterOp, LimitOp,
     LogicalExpression, LogicalOperator, LogicalPlan, SkipOp, SortOp, TripleComponent, TripleScanOp,
 };
-use crate::query::planner::{convert_aggregate_function, convert_filter_expression, PhysicalPlan};
+use crate::query::planner::{PhysicalPlan, convert_aggregate_function, convert_filter_expression};
 
 /// Default chunk size for morsel-driven execution.
 const DEFAULT_CHUNK_SIZE: usize = 1024;
@@ -520,7 +520,9 @@ impl RdfExpressionPredicate {
                 let val = self.eval_expr(operand, chunk, row);
                 self.eval_unary_op(*op, val)
             }
-            FilterExpression::Id(var) | FilterExpression::Labels(var) | FilterExpression::Type(var) => {
+            FilterExpression::Id(var)
+            | FilterExpression::Labels(var)
+            | FilterExpression::Type(var) => {
                 // Treat Id/Labels/Type access as variable lookup for RDF
                 let col_idx = *self.variable_columns.get(var)?;
                 chunk.column(col_idx)?.get_value(row)
@@ -541,85 +543,61 @@ impl RdfExpressionPredicate {
         match op {
             BinaryFilterOp::And => Some(Value::Bool(left.as_bool()? && right.as_bool()?)),
             BinaryFilterOp::Or => Some(Value::Bool(left.as_bool()? || right.as_bool()?)),
-            BinaryFilterOp::Xor => {
-                Some(Value::Bool(left.as_bool()? != right.as_bool()?))
-            }
+            BinaryFilterOp::Xor => Some(Value::Bool(left.as_bool()? != right.as_bool()?)),
             BinaryFilterOp::Eq => Some(Value::Bool(left == right)),
             BinaryFilterOp::Ne => Some(Value::Bool(left != right)),
             BinaryFilterOp::Lt => compare_values(left, right, |o| o.is_lt()),
             BinaryFilterOp::Le => compare_values(left, right, |o| o.is_le()),
             BinaryFilterOp::Gt => compare_values(left, right, |o| o.is_gt()),
             BinaryFilterOp::Ge => compare_values(left, right, |o| o.is_ge()),
-            BinaryFilterOp::Add => {
-                match (left, right) {
-                    (Value::Int64(l), Value::Int64(r)) => Some(Value::Int64(l + r)),
-                    (Value::Float64(l), Value::Float64(r)) => Some(Value::Float64(l + r)),
-                    (Value::Int64(l), Value::Float64(r)) => Some(Value::Float64(*l as f64 + r)),
-                    (Value::Float64(l), Value::Int64(r)) => Some(Value::Float64(l + *r as f64)),
-                    _ => None,
+            BinaryFilterOp::Add => match (left, right) {
+                (Value::Int64(l), Value::Int64(r)) => Some(Value::Int64(l + r)),
+                (Value::Float64(l), Value::Float64(r)) => Some(Value::Float64(l + r)),
+                (Value::Int64(l), Value::Float64(r)) => Some(Value::Float64(*l as f64 + r)),
+                (Value::Float64(l), Value::Int64(r)) => Some(Value::Float64(l + *r as f64)),
+                _ => None,
+            },
+            BinaryFilterOp::Sub => match (left, right) {
+                (Value::Int64(l), Value::Int64(r)) => Some(Value::Int64(l - r)),
+                (Value::Float64(l), Value::Float64(r)) => Some(Value::Float64(l - r)),
+                (Value::Int64(l), Value::Float64(r)) => Some(Value::Float64(*l as f64 - r)),
+                (Value::Float64(l), Value::Int64(r)) => Some(Value::Float64(l - *r as f64)),
+                _ => None,
+            },
+            BinaryFilterOp::Mul => match (left, right) {
+                (Value::Int64(l), Value::Int64(r)) => Some(Value::Int64(l * r)),
+                (Value::Float64(l), Value::Float64(r)) => Some(Value::Float64(l * r)),
+                (Value::Int64(l), Value::Float64(r)) => Some(Value::Float64(*l as f64 * r)),
+                (Value::Float64(l), Value::Int64(r)) => Some(Value::Float64(l * *r as f64)),
+                _ => None,
+            },
+            BinaryFilterOp::Div => match (left, right) {
+                (Value::Int64(l), Value::Int64(r)) if *r != 0 => Some(Value::Int64(l / r)),
+                (Value::Float64(l), Value::Float64(r)) if *r != 0.0 => Some(Value::Float64(l / r)),
+                (Value::Int64(l), Value::Float64(r)) if *r != 0.0 => {
+                    Some(Value::Float64(*l as f64 / r))
                 }
-            }
-            BinaryFilterOp::Sub => {
-                match (left, right) {
-                    (Value::Int64(l), Value::Int64(r)) => Some(Value::Int64(l - r)),
-                    (Value::Float64(l), Value::Float64(r)) => Some(Value::Float64(l - r)),
-                    (Value::Int64(l), Value::Float64(r)) => Some(Value::Float64(*l as f64 - r)),
-                    (Value::Float64(l), Value::Int64(r)) => Some(Value::Float64(l - *r as f64)),
-                    _ => None,
+                (Value::Float64(l), Value::Int64(r)) if *r != 0 => {
+                    Some(Value::Float64(l / *r as f64))
                 }
-            }
-            BinaryFilterOp::Mul => {
-                match (left, right) {
-                    (Value::Int64(l), Value::Int64(r)) => Some(Value::Int64(l * r)),
-                    (Value::Float64(l), Value::Float64(r)) => Some(Value::Float64(l * r)),
-                    (Value::Int64(l), Value::Float64(r)) => Some(Value::Float64(*l as f64 * r)),
-                    (Value::Float64(l), Value::Int64(r)) => Some(Value::Float64(l * *r as f64)),
-                    _ => None,
-                }
-            }
-            BinaryFilterOp::Div => {
-                match (left, right) {
-                    (Value::Int64(l), Value::Int64(r)) if *r != 0 => Some(Value::Int64(l / r)),
-                    (Value::Float64(l), Value::Float64(r)) if *r != 0.0 => {
-                        Some(Value::Float64(l / r))
-                    }
-                    (Value::Int64(l), Value::Float64(r)) if *r != 0.0 => {
-                        Some(Value::Float64(*l as f64 / r))
-                    }
-                    (Value::Float64(l), Value::Int64(r)) if *r != 0 => {
-                        Some(Value::Float64(l / *r as f64))
-                    }
-                    _ => None,
-                }
-            }
-            BinaryFilterOp::Mod => {
-                match (left, right) {
-                    (Value::Int64(l), Value::Int64(r)) if *r != 0 => Some(Value::Int64(l % r)),
-                    _ => None,
-                }
-            }
-            BinaryFilterOp::Contains => {
-                match (left, right) {
-                    (Value::String(l), Value::String(r)) => Some(Value::Bool(l.contains(&**r))),
-                    _ => None,
-                }
-            }
-            BinaryFilterOp::StartsWith => {
-                match (left, right) {
-                    (Value::String(l), Value::String(r)) => {
-                        Some(Value::Bool(l.starts_with(&**r)))
-                    }
-                    _ => None,
-                }
-            }
-            BinaryFilterOp::EndsWith => {
-                match (left, right) {
-                    (Value::String(l), Value::String(r)) => {
-                        Some(Value::Bool(l.ends_with(&**r)))
-                    }
-                    _ => None,
-                }
-            }
+                _ => None,
+            },
+            BinaryFilterOp::Mod => match (left, right) {
+                (Value::Int64(l), Value::Int64(r)) if *r != 0 => Some(Value::Int64(l % r)),
+                _ => None,
+            },
+            BinaryFilterOp::Contains => match (left, right) {
+                (Value::String(l), Value::String(r)) => Some(Value::Bool(l.contains(&**r))),
+                _ => None,
+            },
+            BinaryFilterOp::StartsWith => match (left, right) {
+                (Value::String(l), Value::String(r)) => Some(Value::Bool(l.starts_with(&**r))),
+                _ => None,
+            },
+            BinaryFilterOp::EndsWith => match (left, right) {
+                (Value::String(l), Value::String(r)) => Some(Value::Bool(l.ends_with(&**r))),
+                _ => None,
+            },
             BinaryFilterOp::In => {
                 // Not implemented for RDF filter evaluation
                 None
@@ -655,13 +633,11 @@ impl RdfExpressionPredicate {
             UnaryFilterOp::Not => Some(Value::Bool(!val?.as_bool()?)),
             UnaryFilterOp::IsNull => Some(Value::Bool(val.is_none())),
             UnaryFilterOp::IsNotNull => Some(Value::Bool(val.is_some())),
-            UnaryFilterOp::Neg => {
-                match val? {
-                    Value::Int64(v) => Some(Value::Int64(-v)),
-                    Value::Float64(v) => Some(Value::Float64(-v)),
-                    _ => None,
-                }
-            }
+            UnaryFilterOp::Neg => match val? {
+                Value::Int64(v) => Some(Value::Int64(-v)),
+                Value::Float64(v) => Some(Value::Float64(-v)),
+                _ => None,
+            },
         }
     }
 }
@@ -726,18 +702,9 @@ fn component_to_term(component: &TripleComponent) -> Option<Term> {
         TripleComponent::Iri(iri) => Some(Term::iri(iri.clone())),
         TripleComponent::Literal(value) => match value {
             Value::String(s) => Some(Term::literal(Arc::clone(s))),
-            Value::Int64(i) => Some(Term::typed_literal(
-                i.to_string(),
-                Literal::XSD_INTEGER,
-            )),
-            Value::Float64(f) => Some(Term::typed_literal(
-                f.to_string(),
-                Literal::XSD_DOUBLE,
-            )),
-            Value::Bool(b) => Some(Term::typed_literal(
-                b.to_string(),
-                Literal::XSD_BOOLEAN,
-            )),
+            Value::Int64(i) => Some(Term::typed_literal(i.to_string(), Literal::XSD_INTEGER)),
+            Value::Float64(f) => Some(Term::typed_literal(f.to_string(), Literal::XSD_DOUBLE)),
+            Value::Bool(b) => Some(Term::typed_literal(b.to_string(), Literal::XSD_BOOLEAN)),
             _ => Some(Term::literal(value.to_string())),
         },
     }

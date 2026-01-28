@@ -8,8 +8,8 @@
 //! - Optional schema constraints
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use parking_lot::RwLock;
 
@@ -184,7 +184,11 @@ impl Catalog {
 
     /// Finds indexes for a given label and property key.
     #[must_use]
-    pub fn indexes_for_label_property(&self, label: LabelId, property_key: PropertyKeyId) -> Vec<IndexId> {
+    pub fn indexes_for_label_property(
+        &self,
+        label: LabelId,
+        property_key: PropertyKeyId,
+    ) -> Vec<IndexId> {
         self.indexes.for_label_property(label, property_key)
     }
 
@@ -477,7 +481,12 @@ impl IndexCatalog {
         }
     }
 
-    fn create(&self, label: LabelId, property_key: PropertyKeyId, index_type: IndexType) -> IndexId {
+    fn create(
+        &self,
+        label: LabelId,
+        property_key: PropertyKeyId,
+        index_type: IndexType,
+    ) -> IndexId {
         let id = IndexId::new(self.next_id.fetch_add(1, Ordering::Relaxed));
         let definition = IndexDefinition {
             id,
@@ -511,7 +520,9 @@ impl IndexCatalog {
                 ids.retain(|&i| i != id);
             }
             // Remove from label-property index
-            if let Some(ids) = label_property_indexes.get_mut(&(definition.label, definition.property_key)) {
+            if let Some(ids) =
+                label_property_indexes.get_mut(&(definition.label, definition.property_key))
+            {
                 ids.retain(|&i| i != id);
             }
             true
@@ -664,7 +675,10 @@ mod tests {
 
         // Should be able to look up by ID
         assert_eq!(catalog.get_label_name(person_id).as_deref(), Some("Person"));
-        assert_eq!(catalog.get_label_name(company_id).as_deref(), Some("Company"));
+        assert_eq!(
+            catalog.get_label_name(company_id).as_deref(),
+            Some("Company")
+        );
 
         // Count should be correct
         assert_eq!(catalog.label_count(), 2);
@@ -680,7 +694,10 @@ mod tests {
         assert_ne!(name_id, age_id);
         assert_eq!(catalog.get_or_create_property_key("name"), name_id);
         assert_eq!(catalog.get_property_key_id("name"), Some(name_id));
-        assert_eq!(catalog.get_property_key_name(name_id).as_deref(), Some("name"));
+        assert_eq!(
+            catalog.get_property_key_name(name_id).as_deref(),
+            Some("name")
+        );
         assert_eq!(catalog.property_key_count(), 2);
     }
 
@@ -694,7 +711,10 @@ mod tests {
         assert_ne!(knows_id, works_at_id);
         assert_eq!(catalog.get_or_create_edge_type("KNOWS"), knows_id);
         assert_eq!(catalog.get_edge_type_id("KNOWS"), Some(knows_id));
-        assert_eq!(catalog.get_edge_type_name(knows_id).as_deref(), Some("KNOWS"));
+        assert_eq!(
+            catalog.get_edge_type_name(knows_id).as_deref(),
+            Some("KNOWS")
+        );
         assert_eq!(catalog.edge_type_count(), 2);
     }
 
@@ -866,7 +886,11 @@ mod tests {
         let invalid_property = PropertyKeyId::new(999);
 
         assert!(catalog.indexes_for_label(invalid_label).is_empty());
-        assert!(catalog.indexes_for_label_property(invalid_label, invalid_property).is_empty());
+        assert!(
+            catalog
+                .indexes_for_label_property(invalid_label, invalid_property)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -890,9 +914,18 @@ mod tests {
         assert!(indexes.contains(&fulltext_idx));
 
         // Verify each has the correct type
-        assert_eq!(catalog.get_index(hash_idx).unwrap().index_type, IndexType::Hash);
-        assert_eq!(catalog.get_index(btree_idx).unwrap().index_type, IndexType::BTree);
-        assert_eq!(catalog.get_index(fulltext_idx).unwrap().index_type, IndexType::FullText);
+        assert_eq!(
+            catalog.get_index(hash_idx).unwrap().index_type,
+            IndexType::Hash
+        );
+        assert_eq!(
+            catalog.get_index(btree_idx).unwrap().index_type,
+            IndexType::BTree
+        );
+        assert_eq!(
+            catalog.get_index(fulltext_idx).unwrap().index_type,
+            IndexType::FullText
+        );
     }
 
     #[test]
@@ -1044,8 +1077,14 @@ mod tests {
         assert_ne!(label2, label3);
         assert_ne!(label3, label4);
 
-        assert_eq!(catalog.get_label_name(label1).as_deref(), Some("Label With Spaces"));
-        assert_eq!(catalog.get_label_name(label4).as_deref(), Some("LabelWithUnicode\u{00E9}"));
+        assert_eq!(
+            catalog.get_label_name(label1).as_deref(),
+            Some("Label With Spaces")
+        );
+        assert_eq!(
+            catalog.get_label_name(label4).as_deref(),
+            Some("LabelWithUnicode\u{00E9}")
+        );
     }
 
     #[test]
@@ -1058,7 +1097,10 @@ mod tests {
         let empty_edge = catalog.get_or_create_edge_type("");
 
         assert_eq!(catalog.get_label_name(empty_label).as_deref(), Some(""));
-        assert_eq!(catalog.get_property_key_name(empty_prop).as_deref(), Some(""));
+        assert_eq!(
+            catalog.get_property_key_name(empty_prop).as_deref(),
+            Some("")
+        );
         assert_eq!(catalog.get_edge_type_name(empty_edge).as_deref(), Some(""));
 
         // Calling again should return same ID
@@ -1114,8 +1156,14 @@ mod tests {
 
     #[test]
     fn test_catalog_error_equality() {
-        assert_eq!(CatalogError::SchemaNotEnabled, CatalogError::SchemaNotEnabled);
-        assert_eq!(CatalogError::ConstraintAlreadyExists, CatalogError::ConstraintAlreadyExists);
+        assert_eq!(
+            CatalogError::SchemaNotEnabled,
+            CatalogError::SchemaNotEnabled
+        );
+        assert_eq!(
+            CatalogError::ConstraintAlreadyExists,
+            CatalogError::ConstraintAlreadyExists
+        );
         assert_eq!(
             CatalogError::LabelNotFound("X".to_string()),
             CatalogError::LabelNotFound("X".to_string())

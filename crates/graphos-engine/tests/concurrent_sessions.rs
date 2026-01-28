@@ -114,7 +114,11 @@ fn test_concurrent_write_sessions() {
     for i in 0..num_threads {
         let query = format!("MATCH (n:Thread{}) RETURN n", i);
         let result = session.execute(&query).unwrap();
-        assert!(result.row_count() >= 1, "Node for thread {} should exist", i);
+        assert!(
+            result.row_count() >= 1,
+            "Node for thread {} should exist",
+            i
+        );
     }
 }
 
@@ -265,7 +269,8 @@ fn test_interleaved_transactions() {
                     session.begin_tx().unwrap();
 
                     // Do some work
-                    let query = format!("INSERT (:Work {{thread: {}, iteration: {}}})", thread_id, i);
+                    let query =
+                        format!("INSERT (:Work {{thread: {}, iteration: {}}})", thread_id, i);
                     let _ = session.execute(&query);
 
                     // Randomly commit or rollback (based on iteration)
@@ -285,7 +290,11 @@ fn test_interleaved_transactions() {
         handle.join().expect("Thread panicked");
     }
 
-    assert_eq!(completed.load(Ordering::Relaxed), 4, "All threads should complete");
+    assert_eq!(
+        completed.load(Ordering::Relaxed),
+        4,
+        "All threads should complete"
+    );
 }
 
 // ============================================================================
@@ -355,7 +364,10 @@ fn test_sessions_share_committed_data() {
 
     // Session 2 should see the data
     let result = session2.execute("MATCH (n:Shared) RETURN n.key").unwrap();
-    assert!(result.row_count() >= 1, "Session 2 should see committed data from Session 1");
+    assert!(
+        result.row_count() >= 1,
+        "Session 2 should see committed data from Session 1"
+    );
 }
 
 #[test]
@@ -427,7 +439,9 @@ async fn test_async_transaction_isolation() {
     let writer = task::spawn_blocking(move || {
         let mut session = db_writer.session();
         session.begin_tx().unwrap();
-        session.execute("INSERT (:AsyncIsolated {data: 'test'})").unwrap();
+        session
+            .execute("INSERT (:AsyncIsolated {data: 'test'})")
+            .unwrap();
 
         // Signal ready
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -457,7 +471,10 @@ async fn test_async_transaction_isolation() {
     writer.await.expect("Writer task panicked");
     let count = reader.await.expect("Reader task panicked");
 
-    assert!(count >= 1, "Should see committed data after writer completes");
+    assert!(
+        count >= 1,
+        "Should see committed data after writer completes"
+    );
 }
 
 // ============================================================================
@@ -497,5 +514,9 @@ fn test_multiple_sequential_transactions() {
     }
 
     let result = session.execute("MATCH (n:Sequential) RETURN n").unwrap();
-    assert_eq!(result.row_count(), 5, "All 5 sequential transactions should have committed");
+    assert_eq!(
+        result.row_count(),
+        5,
+        "All 5 sequential transactions should have committed"
+    );
 }

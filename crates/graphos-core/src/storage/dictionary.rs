@@ -120,13 +120,17 @@ impl DictionaryEncoding {
         }
 
         // Estimate original size: sum of string lengths
-        let original_size: usize = self.codes.iter().map(|&code| {
-            if (code as usize) < self.dictionary.len() {
-                self.dictionary[code as usize].len()
-            } else {
-                0
-            }
-        }).sum();
+        let original_size: usize = self
+            .codes
+            .iter()
+            .map(|&code| {
+                if (code as usize) < self.dictionary.len() {
+                    self.dictionary[code as usize].len()
+                } else {
+                    0
+                }
+            })
+            .sum();
 
         // Compressed size: dictionary + codes
         let dict_size: usize = self.dictionary.iter().map(|s| s.len()).sum();

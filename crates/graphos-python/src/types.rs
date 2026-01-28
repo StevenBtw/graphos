@@ -223,9 +223,7 @@ impl PyValue {
                 }
                 dict.unbind().into_any()
             }
-            Value::Bytes(bytes) => {
-                PyBytes::new(py, bytes.as_ref()).unbind().into_any()
-            }
+            Value::Bytes(bytes) => PyBytes::new(py, bytes.as_ref()).unbind().into_any(),
             Value::Timestamp(ts) => {
                 // Convert microseconds to seconds (as float for precision)
                 let micros = ts.as_micros();

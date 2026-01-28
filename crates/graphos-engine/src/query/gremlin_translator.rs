@@ -271,7 +271,9 @@ impl GremlinTranslator {
                         right: Box::new(LogicalExpression::List(
                             labels
                                 .iter()
-                                .map(|l| LogicalExpression::Literal(Value::String(l.clone().into())))
+                                .map(|l| {
+                                    LogicalExpression::Literal(Value::String(l.clone().into()))
+                                })
                                 .collect(),
                         )),
                     }
@@ -572,7 +574,9 @@ impl GremlinTranslator {
                 let label_check = LogicalExpression::Binary {
                     left: Box::new(LogicalExpression::Labels(var.to_string())),
                     op: BinaryOp::Eq,
-                    right: Box::new(LogicalExpression::Literal(Value::String(label.clone().into()))),
+                    right: Box::new(LogicalExpression::Literal(Value::String(
+                        label.clone().into(),
+                    ))),
                 };
                 let prop_check = LogicalExpression::Binary {
                     left: Box::new(LogicalExpression::Property {

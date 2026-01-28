@@ -83,8 +83,8 @@ impl ZoneMapEntry {
 
                 // Value must be >= min and <= max
                 match (cmp_min, cmp_max) {
-                    (Some(Ordering::Less), _) => false,     // value < min
-                    (_, Some(Ordering::Greater)) => false,  // value > max
+                    (Some(Ordering::Less), _) => false,    // value < min
+                    (_, Some(Ordering::Greater)) => false, // value > max
                     _ => true,
                 }
             }
@@ -354,15 +354,11 @@ impl ZoneMapIndex {
     /// Returns chunk IDs sorted by their minimum value.
     pub fn chunks_ordered_by_min(&self) -> Vec<u64> {
         let mut chunks: Vec<_> = self.entries.iter().collect();
-        chunks.sort_by(|(_, a), (_, b)| {
-            match (&a.min, &b.min) {
-                (Some(a_min), Some(b_min)) => {
-                    compare_values(a_min, b_min).unwrap_or(Ordering::Equal)
-                }
-                (Some(_), None) => Ordering::Less,
-                (None, Some(_)) => Ordering::Greater,
-                (None, None) => Ordering::Equal,
-            }
+        chunks.sort_by(|(_, a), (_, b)| match (&a.min, &b.min) {
+            (Some(a_min), Some(b_min)) => compare_values(a_min, b_min).unwrap_or(Ordering::Equal),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
         });
         chunks.into_iter().map(|(&id, _)| id).collect()
     }
@@ -513,8 +509,8 @@ fn optimal_num_hashes(m: usize, n: usize) -> usize {
 
 /// Computes a hash for a value.
 fn value_hash(value: &Value) -> u64 {
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
     let mut hasher = DefaultHasher::new();
 

@@ -41,6 +41,8 @@ pub mod dictionary;
 // Re-export commonly used types
 pub use bitpack::{BitPackedInts, DeltaBitPacked};
 pub use bitvec::BitVector;
-pub use codec::{CodecSelector, CompressedData, CompressionCodec, CompressionMetadata, TypeSpecificCompressor};
-pub use delta::{zigzag_decode, zigzag_encode, DeltaEncoding};
+pub use codec::{
+    CodecSelector, CompressedData, CompressionCodec, CompressionMetadata, TypeSpecificCompressor,
+};
+pub use delta::{DeltaEncoding, zigzag_decode, zigzag_encode};
 pub use dictionary::{DictionaryBuilder, DictionaryEncoding};

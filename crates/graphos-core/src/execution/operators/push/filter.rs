@@ -64,9 +64,7 @@ impl FilterPredicate for ColumnPredicate {
                     Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
                 )
             }
-            CompareOp::Gt => {
-                compare_values(&val, &self.value) == Some(std::cmp::Ordering::Greater)
-            }
+            CompareOp::Gt => compare_values(&val, &self.value) == Some(std::cmp::Ordering::Greater),
             CompareOp::Ge => {
                 matches!(
                     compare_values(&val, &self.value),

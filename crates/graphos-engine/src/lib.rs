@@ -12,10 +12,6 @@
 //! - [`query`] - Query processing, binding, planning, optimization, execution
 //! - [`catalog`] - Schema and index catalog
 
-#![warn(missing_docs)]
-#![warn(clippy::all)]
-#![warn(clippy::pedantic)]
-
 pub mod catalog;
 pub mod config;
 pub mod database;

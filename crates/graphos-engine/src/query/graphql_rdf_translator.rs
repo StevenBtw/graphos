@@ -12,7 +12,7 @@
 
 use crate::query::plan::{
     BinaryOp, FilterOp, JoinOp, JoinType, LogicalExpression, LogicalOperator, LogicalPlan,
-    Projection, ProjectOp, TripleComponent, TripleScanOp,
+    ProjectOp, Projection, TripleComponent, TripleScanOp,
 };
 use graphos_adapters::query::graphql::{self, ast};
 use graphos_common::utils::error::{Error, QueryError, QueryErrorKind, Result};
@@ -69,7 +69,12 @@ impl GraphQLRdfTranslator {
                 ast::Definition::Operation(op) => Some(op),
                 _ => None,
             })
-            .ok_or_else(|| Error::Query(QueryError::new(QueryErrorKind::Syntax, "No operation found in document")))?;
+            .ok_or_else(|| {
+                Error::Query(QueryError::new(
+                    QueryErrorKind::Syntax,
+                    "No operation found in document",
+                ))
+            })?;
 
         // Only Query operations are supported
         if operation.operation != ast::OperationType::Query {
@@ -93,7 +98,10 @@ impl GraphQLRdfTranslator {
         // Each field in the root selection set is a separate query
         let selections = &op.selection_set.selections;
         if selections.is_empty() {
-            return Err(Error::Query(QueryError::new(QueryErrorKind::Syntax, "Empty selection set")));
+            return Err(Error::Query(QueryError::new(
+                QueryErrorKind::Syntax,
+                "Empty selection set",
+            )));
         }
 
         // Get the first field
@@ -352,7 +360,10 @@ impl GraphQLRdfTranslator {
                 return Ok(field);
             }
         }
-        Err(Error::Query(QueryError::new(QueryErrorKind::Syntax, "No field found in selection set")))
+        Err(Error::Query(QueryError::new(
+            QueryErrorKind::Syntax,
+            "No field found in selection set",
+        )))
     }
 
     fn make_type_iri(&self, type_name: &str) -> String {

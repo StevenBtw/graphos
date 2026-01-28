@@ -9,7 +9,7 @@
 // Arena allocators require unsafe code for memory management
 #![allow(unsafe_code)]
 
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

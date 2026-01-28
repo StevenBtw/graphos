@@ -244,12 +244,7 @@ impl<T: Clone> VersionChain<T> {
     ///
     /// If the version is not owned by this transaction, creates a new version
     /// with a copy of the data.
-    pub fn get_mut(
-        &mut self,
-        epoch: EpochId,
-        tx: TxId,
-        modify_epoch: EpochId,
-    ) -> Option<&mut T> {
+    pub fn get_mut(&mut self, epoch: EpochId, tx: TxId, modify_epoch: EpochId) -> Option<&mut T> {
         // Find the visible version
         let visible_idx = self
             .versions

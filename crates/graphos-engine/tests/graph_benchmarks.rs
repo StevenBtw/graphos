@@ -178,7 +178,10 @@ fn bench_bulk_edge_insertion() {
         if src != dst {
             let query = format!(
                 "MATCH (a:Person {{id: {}}}), (b:Person {{id: {}}}) INSERT (a)-[:FRIENDS {{since: {}, weight: {}}}]->(b)",
-                src, dst, 2000 + (i % 24), (i % 100) as f64 / 100.0
+                src,
+                dst,
+                2000 + (i % 24),
+                (i % 100) as f64 / 100.0
             );
             let _ = session2.execute(&query);
         }
@@ -202,7 +205,10 @@ fn bench_graph_traversals() {
     let node_count = 10_000;
     let edge_count = node_count * 5;
 
-    println!("  Setting up graph: {} nodes, ~{} edges...", node_count, edge_count);
+    println!(
+        "  Setting up graph: {} nodes, ~{} edges...",
+        node_count, edge_count
+    );
 
     // Create nodes
     for i in 0..node_count {
@@ -301,7 +307,10 @@ fn bench_filtering() {
 
     let node_count = 50_000;
 
-    println!("  Setting up {} nodes with varied properties...", node_count);
+    println!(
+        "  Setting up {} nodes with varied properties...",
+        node_count
+    );
 
     // Create nodes with varied properties
     for i in 0..node_count {
@@ -569,7 +578,10 @@ fn bench_pattern_matching() {
     let node_count = 5_000;
     let edge_count = node_count * 8;
 
-    println!("  Setting up graph: {} nodes, ~{} edges...", node_count, edge_count);
+    println!(
+        "  Setting up graph: {} nodes, ~{} edges...",
+        node_count, edge_count
+    );
 
     // Create a dense graph suitable for pattern matching
     for i in 0..node_count {
@@ -648,7 +660,11 @@ fn bench_mixed_workload() {
     println!("  Setting up {} initial nodes...", initial_nodes);
 
     for i in 0..initial_nodes {
-        let query = format!("INSERT (:Account {{id: {}, balance: {}}})", i, 1000 + (i % 10000));
+        let query = format!(
+            "INSERT (:Account {{id: {}, balance: {}}})",
+            i,
+            1000 + (i % 10000)
+        );
         session.execute(&query).unwrap();
     }
 
@@ -659,7 +675,9 @@ fn bench_mixed_workload() {
         if src != dst {
             let query = format!(
                 "MATCH (a:Account {{id: {}}}), (b:Account {{id: {}}}) INSERT (a)-[:TRANSFER {{amount: {}}}]->(b)",
-                src, dst, (i % 500) + 10
+                src,
+                dst,
+                (i % 500) + 10
             );
             let _ = session.execute(&query);
         }

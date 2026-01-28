@@ -34,20 +34,17 @@ pub use aggregate::{
 pub use distinct::DistinctOperator;
 pub use expand::ExpandOperator;
 pub use filter::{
-    BinaryFilterOp, ExpressionPredicate, FilterExpression, FilterOperator, Predicate,
-    UnaryFilterOp,
+    BinaryFilterOp, ExpressionPredicate, FilterExpression, FilterOperator, Predicate, UnaryFilterOp,
 };
 pub use join::{
     EqualityCondition, HashJoinOperator, HashKey, JoinCondition, JoinType, NestedLoopJoinOperator,
 };
 pub use limit::{LimitOperator, LimitSkipOperator, SkipOperator};
+pub use merge::MergeOperator;
 pub use mutation::{
     AddLabelOperator, CreateEdgeOperator, CreateNodeOperator, DeleteEdgeOperator,
     DeleteNodeOperator, PropertySource, RemoveLabelOperator, SetPropertyOperator,
 };
-pub use merge::MergeOperator;
-pub use union::UnionOperator;
-pub use unwind::UnwindOperator;
 pub use project::{ProjectExpr, ProjectOperator};
 pub use push::{
     AggregatePushOperator, DistinctMaterializingOperator, DistinctPushOperator, FilterPushOperator,
@@ -56,6 +53,8 @@ pub use push::{
 };
 pub use scan::ScanOperator;
 pub use sort::{NullOrder, SortDirection, SortKey, SortOperator};
+pub use union::UnionOperator;
+pub use unwind::UnwindOperator;
 
 use thiserror::Error;
 

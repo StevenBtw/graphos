@@ -84,7 +84,6 @@ pub enum LogicalOperator {
     Empty,
 
     // ==================== RDF/SPARQL Operators ====================
-
     /// Scan RDF triples matching a pattern.
     TripleScan(TripleScanOp),
 

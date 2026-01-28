@@ -8,8 +8,8 @@ use std::cmp::Ordering;
 use graphos_common::types::{LogicalType, Value};
 
 use super::{Operator, OperatorError, OperatorResult};
-use crate::execution::chunk::DataChunkBuilder;
 use crate::execution::DataChunk;
+use crate::execution::chunk::DataChunkBuilder;
 
 /// Sort direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,8 +274,7 @@ mod tests {
     impl Operator for MockOperator {
         fn next(&mut self) -> OperatorResult {
             if self.position < self.chunks.len() {
-                let chunk =
-                    std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
+                let chunk = std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
                 self.position += 1;
                 Ok(Some(chunk))
             } else {
@@ -295,12 +294,7 @@ mod tests {
     fn create_unsorted_chunk() -> DataChunk {
         let mut builder = DataChunkBuilder::new(&[LogicalType::Int64, LogicalType::String]);
 
-        let data = [
-            (3i64, "cherry"),
-            (1, "apple"),
-            (4, "date"),
-            (2, "banana"),
-        ];
+        let data = [(3i64, "cherry"), (1, "apple"), (4, "date"), (2, "banana")];
 
         for (num, text) in data {
             builder.column_mut(0).unwrap().push_int64(num);
@@ -325,7 +319,12 @@ mod tests {
         while let Some(chunk) = sort.next().unwrap() {
             for row in chunk.selected_indices() {
                 let num = chunk.column(0).unwrap().get_int64(row).unwrap();
-                let text = chunk.column(1).unwrap().get_string(row).unwrap().to_string();
+                let text = chunk
+                    .column(1)
+                    .unwrap()
+                    .get_string(row)
+                    .unwrap()
+                    .to_string();
                 results.push((num, text));
             }
         }
@@ -375,7 +374,12 @@ mod tests {
         let mut results = Vec::new();
         while let Some(chunk) = sort.next().unwrap() {
             for row in chunk.selected_indices() {
-                let text = chunk.column(1).unwrap().get_string(row).unwrap().to_string();
+                let text = chunk
+                    .column(1)
+                    .unwrap()
+                    .get_string(row)
+                    .unwrap()
+                    .to_string();
                 results.push(text);
             }
         }

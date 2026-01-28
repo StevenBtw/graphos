@@ -128,7 +128,8 @@ impl ExternalSort {
         }
 
         spill_file.finish_write()?;
-        self.manager.register_spilled_bytes(spill_file.bytes_written());
+        self.manager
+            .register_spilled_bytes(spill_file.bytes_written());
 
         self.sorted_runs.push(spill_file);
         self.run_row_counts.push(row_count);
@@ -143,7 +144,10 @@ impl ExternalSort {
     /// # Errors
     ///
     /// Returns an error if reading from disk fails.
-    pub fn merge_all(&mut self, in_memory_buffer: Vec<Vec<Value>>) -> std::io::Result<Vec<Vec<Value>>> {
+    pub fn merge_all(
+        &mut self,
+        in_memory_buffer: Vec<Vec<Value>>,
+    ) -> std::io::Result<Vec<Vec<Value>>> {
         let num_runs = self.sorted_runs.len();
         let has_memory = !in_memory_buffer.is_empty();
 
@@ -186,7 +190,10 @@ impl ExternalSort {
     }
 
     /// Performs k-way merge of all runs and an optional in-memory buffer.
-    fn k_way_merge(&mut self, mut in_memory_buffer: Vec<Vec<Value>>) -> std::io::Result<Vec<Vec<Value>>> {
+    fn k_way_merge(
+        &mut self,
+        mut in_memory_buffer: Vec<Vec<Value>>,
+    ) -> std::io::Result<Vec<Vec<Value>>> {
         let total_rows = self.total_rows() + in_memory_buffer.len();
         let mut result = Vec::with_capacity(total_rows);
 
@@ -305,7 +312,10 @@ impl RunReader {
             return Ok(None);
         }
 
-        let row = deserialize_row(&mut SpillFileReaderAdapter(&mut self.reader), self.num_columns)?;
+        let row = deserialize_row(
+            &mut SpillFileReaderAdapter(&mut self.reader),
+            self.num_columns,
+        )?;
         self.remaining -= 1;
         self.current_row = Some(row.clone());
         Ok(Some(row))
@@ -473,8 +483,10 @@ mod tests {
         let mut sort = ExternalSort::new(manager, 1, vec![SortKey::ascending(0)]);
 
         // Spill two sorted runs
-        sort.spill_sorted_run(vec![row(&[1]), row(&[3]), row(&[5])]).unwrap();
-        sort.spill_sorted_run(vec![row(&[2]), row(&[4]), row(&[6])]).unwrap();
+        sort.spill_sorted_run(vec![row(&[1]), row(&[3]), row(&[5])])
+            .unwrap();
+        sort.spill_sorted_run(vec![row(&[2]), row(&[4]), row(&[6])])
+            .unwrap();
 
         assert_eq!(sort.num_runs(), 2);
 
@@ -491,7 +503,8 @@ mod tests {
         let mut sort = ExternalSort::new(manager, 1, vec![SortKey::ascending(0)]);
 
         // Spill a run
-        sort.spill_sorted_run(vec![row(&[1]), row(&[4]), row(&[7])]).unwrap();
+        sort.spill_sorted_run(vec![row(&[1]), row(&[4]), row(&[7])])
+            .unwrap();
 
         // Merge with in-memory buffer
         let buffer = vec![row(&[6]), row(&[3]), row(&[5]), row(&[2])];
@@ -508,8 +521,10 @@ mod tests {
         let (_temp_dir, manager) = create_manager();
         let mut sort = ExternalSort::new(manager, 1, vec![SortKey::descending(0)]);
 
-        sort.spill_sorted_run(vec![row(&[5]), row(&[3]), row(&[1])]).unwrap();
-        sort.spill_sorted_run(vec![row(&[6]), row(&[4]), row(&[2])]).unwrap();
+        sort.spill_sorted_run(vec![row(&[5]), row(&[3]), row(&[1])])
+            .unwrap();
+        sort.spill_sorted_run(vec![row(&[6]), row(&[4]), row(&[2])])
+            .unwrap();
 
         let result = sort.merge_all(Vec::new()).unwrap();
         assert_eq!(result.len(), 6);
@@ -529,13 +544,15 @@ mod tests {
             vec![Value::Int64(1), Value::Int64(30)],
             vec![Value::Int64(1), Value::Int64(10)],
             vec![Value::Int64(2), Value::Int64(20)],
-        ]).unwrap();
+        ])
+        .unwrap();
 
         sort.spill_sorted_run(vec![
             vec![Value::Int64(1), Value::Int64(20)],
             vec![Value::Int64(2), Value::Int64(30)],
             vec![Value::Int64(2), Value::Int64(10)],
-        ]).unwrap();
+        ])
+        .unwrap();
 
         let result = sort.merge_all(Vec::new()).unwrap();
 
@@ -564,12 +581,11 @@ mod tests {
             vec![Value::Int64(1)],
             vec![Value::Int64(3)],
             vec![Value::Null],
-        ]).unwrap();
+        ])
+        .unwrap();
 
-        sort.spill_sorted_run(vec![
-            vec![Value::Int64(2)],
-            vec![Value::Null],
-        ]).unwrap();
+        sort.spill_sorted_run(vec![vec![Value::Int64(2)], vec![Value::Null]])
+            .unwrap();
 
         let result = sort.merge_all(Vec::new()).unwrap();
 

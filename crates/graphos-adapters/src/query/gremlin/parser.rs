@@ -59,13 +59,21 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::LParen)?;
                 let ids = self.parse_optional_value_list()?;
                 self.expect(TokenKind::RParen)?;
-                Ok(TraversalSource::V(if ids.is_empty() { None } else { Some(ids) }))
+                Ok(TraversalSource::V(if ids.is_empty() {
+                    None
+                } else {
+                    Some(ids)
+                }))
             }
             TokenKind::E => {
                 self.expect(TokenKind::LParen)?;
                 let ids = self.parse_optional_value_list()?;
                 self.expect(TokenKind::RParen)?;
-                Ok(TraversalSource::E(if ids.is_empty() { None } else { Some(ids) }))
+                Ok(TraversalSource::E(if ids.is_empty() {
+                    None
+                } else {
+                    Some(ids)
+                }))
             }
             TokenKind::AddV => {
                 self.expect(TokenKind::LParen)?;

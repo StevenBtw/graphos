@@ -362,7 +362,7 @@ mod tests {
         assert_eq!(Value::Int64(42).as_int64(), Some(42));
         assert_eq!(Value::String("test".into()).as_int64(), None);
 
-        assert_eq!(Value::Float64(3.14).as_float64(), Some(3.14));
+        assert_eq!(Value::Float64(1.234).as_float64(), Some(1.234));
         assert_eq!(Value::String("hello".into()).as_str(), Some("hello"));
     }
 
@@ -374,8 +374,8 @@ mod tests {
         let v: Value = 42i64.into();
         assert_eq!(v.as_int64(), Some(42));
 
-        let v: Value = 3.14f64.into();
-        assert_eq!(v.as_float64(), Some(3.14));
+        let v: Value = 1.234f64.into();
+        assert_eq!(v.as_float64(), Some(1.234));
 
         let v: Value = "hello".into();
         assert_eq!(v.as_str(), Some("hello"));

@@ -191,8 +191,11 @@ impl PyAlgorithms {
             }
         } else {
             let result = algorithms::dijkstra(store, NodeId::new(source), weight);
-            let distances: HashMap<u64, f64> =
-                result.distances.into_iter().map(|(n, d)| (n.0, d)).collect();
+            let distances: HashMap<u64, f64> = result
+                .distances
+                .into_iter()
+                .map(|(n, d)| (n.0, d))
+                .collect();
             Ok(distances.into_pyobject(py)?.into_any().unbind())
         }
     }
@@ -258,14 +261,22 @@ impl PyAlgorithms {
     /// Returns:
     ///     Dict with 'distances', 'predecessors', and 'has_negative_cycle' keys
     #[pyo3(signature = (source, weight=None))]
-    fn bellman_ford(&self, source: u64, weight: Option<&str>, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    fn bellman_ford(
+        &self,
+        source: u64,
+        weight: Option<&str>,
+        py: Python<'_>,
+    ) -> PyResult<Py<PyAny>> {
         let db = self.db.read();
         let store = db.store();
 
         let result = algorithms::bellman_ford(store, NodeId::new(source), weight);
 
-        let distances: HashMap<u64, f64> =
-            result.distances.into_iter().map(|(n, d)| (n.0, d)).collect();
+        let distances: HashMap<u64, f64> = result
+            .distances
+            .into_iter()
+            .map(|(n, d)| (n.0, d))
+            .collect();
         let predecessors: HashMap<u64, u64> = result
             .predecessors
             .into_iter()
@@ -428,8 +439,11 @@ impl PyAlgorithms {
         let store = db.store();
         let result = algorithms::louvain(store, resolution);
 
-        let communities: HashMap<u64, u64> =
-            result.communities.into_iter().map(|(n, c)| (n.0, c)).collect();
+        let communities: HashMap<u64, u64> = result
+            .communities
+            .into_iter()
+            .map(|(n, c)| (n.0, c))
+            .collect();
 
         let dict = PyDict::new(py);
         dict.set_item("communities", communities.into_pyobject(py)?)?;
@@ -478,7 +492,12 @@ impl PyAlgorithms {
     /// Returns:
     ///     Dict with 'edges' (list of (src, dst, weight)) and 'total_weight'
     #[pyo3(signature = (weight=None, start=None))]
-    fn prim(&self, weight: Option<&str>, start: Option<u64>, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    fn prim(
+        &self,
+        weight: Option<&str>,
+        start: Option<u64>,
+        py: Python<'_>,
+    ) -> PyResult<Py<PyAny>> {
         let db = self.db.read();
         let store = db.store();
         let start_node = start.map(NodeId::new);
@@ -535,10 +554,9 @@ impl PyAlgorithms {
 
                 Ok(dict.into_any().unbind())
             }
-            None => Err(PyGraphosError::InvalidArgument(
-                "Invalid source or sink node".into(),
-            )
-            .into()),
+            None => {
+                Err(PyGraphosError::InvalidArgument("Invalid source or sink node".into()).into())
+            }
         }
     }
 
@@ -585,10 +603,9 @@ impl PyAlgorithms {
 
                 Ok(dict.into_any().unbind())
             }
-            None => Err(PyGraphosError::InvalidArgument(
-                "Invalid source or sink node".into(),
-            )
-            .into()),
+            None => {
+                Err(PyGraphosError::InvalidArgument("Invalid source or sink node".into()).into())
+            }
         }
     }
 

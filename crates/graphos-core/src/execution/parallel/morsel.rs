@@ -190,19 +190,40 @@ mod tests {
 
     #[test]
     fn test_compute_morsel_size() {
-        assert_eq!(compute_morsel_size(PressureLevel::Normal), DEFAULT_MORSEL_SIZE);
-        assert_eq!(compute_morsel_size(PressureLevel::Moderate), MODERATE_PRESSURE_MORSEL_SIZE);
-        assert_eq!(compute_morsel_size(PressureLevel::High), HIGH_PRESSURE_MORSEL_SIZE);
-        assert_eq!(compute_morsel_size(PressureLevel::Critical), CRITICAL_PRESSURE_MORSEL_SIZE);
+        assert_eq!(
+            compute_morsel_size(PressureLevel::Normal),
+            DEFAULT_MORSEL_SIZE
+        );
+        assert_eq!(
+            compute_morsel_size(PressureLevel::Moderate),
+            MODERATE_PRESSURE_MORSEL_SIZE
+        );
+        assert_eq!(
+            compute_morsel_size(PressureLevel::High),
+            HIGH_PRESSURE_MORSEL_SIZE
+        );
+        assert_eq!(
+            compute_morsel_size(PressureLevel::Critical),
+            CRITICAL_PRESSURE_MORSEL_SIZE
+        );
     }
 
     #[test]
     fn test_compute_morsel_size_with_base() {
         let base = 10000;
 
-        assert_eq!(compute_morsel_size_with_base(base, PressureLevel::Normal), 10000);
-        assert_eq!(compute_morsel_size_with_base(base, PressureLevel::Moderate), 5000);
-        assert_eq!(compute_morsel_size_with_base(base, PressureLevel::High), 2500);
+        assert_eq!(
+            compute_morsel_size_with_base(base, PressureLevel::Normal),
+            10000
+        );
+        assert_eq!(
+            compute_morsel_size_with_base(base, PressureLevel::Moderate),
+            5000
+        );
+        assert_eq!(
+            compute_morsel_size_with_base(base, PressureLevel::High),
+            2500
+        );
         assert_eq!(
             compute_morsel_size_with_base(base, PressureLevel::Critical),
             MIN_MORSEL_SIZE

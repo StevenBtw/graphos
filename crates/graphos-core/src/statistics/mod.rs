@@ -11,8 +11,7 @@ mod histogram;
 mod rdf;
 
 pub use collector::{
-    ColumnStatistics, EdgeTypeStatistics, LabelStatistics, PropertyKey, Statistics,
-    TableStatistics,
+    ColumnStatistics, EdgeTypeStatistics, LabelStatistics, PropertyKey, Statistics, TableStatistics,
 };
 pub use histogram::{Histogram, HistogramBucket};
 pub use rdf::{

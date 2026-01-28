@@ -7,11 +7,11 @@ use std::sync::OnceLock;
 use graphos_common::types::{NodeId, Value};
 use graphos_common::utils::error::Result;
 use graphos_common::utils::hash::{FxHashMap, FxHashSet};
-use graphos_core::graph::lpg::LpgStore;
 use graphos_core::graph::Direction;
+use graphos_core::graph::lpg::LpgStore;
 
-use super::traits::GraphAlgorithm;
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
+use super::traits::GraphAlgorithm;
 
 // ============================================================================
 // Articulation Points (Cut Vertices)
@@ -362,9 +362,8 @@ pub fn kcore_decomposition(store: &LpgStore) -> KCoreResult {
         }
     }
 
-    let core_numbers: FxHashMap<NodeId, usize> = (0..n)
-        .map(|i| (idx_to_node[i], core[i]))
-        .collect();
+    let core_numbers: FxHashMap<NodeId, usize> =
+        (0..n).map(|i| (idx_to_node[i], core[i])).collect();
 
     KCoreResult {
         core_numbers,
@@ -444,16 +443,10 @@ impl GraphAlgorithm for BridgesAlgorithm {
     fn execute(&self, store: &LpgStore, _params: &Parameters) -> Result<AlgorithmResult> {
         let bridge_list = bridges(store);
 
-        let mut result = AlgorithmResult::new(vec![
-            "source".to_string(),
-            "target".to_string(),
-        ]);
+        let mut result = AlgorithmResult::new(vec!["source".to_string(), "target".to_string()]);
 
         for (src, dst) in bridge_list {
-            result.add_row(vec![
-                Value::Int64(src.0 as i64),
-                Value::Int64(dst.0 as i64),
-            ]);
+            result.add_row(vec![Value::Int64(src.0 as i64), Value::Int64(dst.0 as i64)]);
         }
 
         Ok(result)
@@ -499,10 +492,8 @@ impl GraphAlgorithm for KCoreAlgorithm {
             // Return nodes in the k-core
             let k_core_nodes = decomposition.k_core(k as usize);
 
-            let mut result = AlgorithmResult::new(vec![
-                "node_id".to_string(),
-                "in_k_core".to_string(),
-            ]);
+            let mut result =
+                AlgorithmResult::new(vec!["node_id".to_string(), "in_k_core".to_string()]);
 
             for node in k_core_nodes {
                 result.add_row(vec![Value::Int64(node.0 as i64), Value::Bool(true)]);
@@ -748,9 +739,7 @@ mod tests {
         let result = kcore_decomposition(&store);
 
         // Total nodes in all shells should equal total nodes
-        let total_in_shells: usize = (0..=result.max_core)
-            .map(|k| result.k_shell(k).len())
-            .sum();
+        let total_in_shells: usize = (0..=result.max_core).map(|k| result.k_shell(k).len()).sum();
         assert_eq!(total_in_shells, 4);
     }
 }

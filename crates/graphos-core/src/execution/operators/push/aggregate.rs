@@ -342,7 +342,8 @@ impl PushOperator for AggregatePushOperator {
 
     fn finalize(&mut self, sink: &mut dyn Sink) -> Result<(), OperatorError> {
         let num_output_cols = self.group_by.len() + self.aggregates.len();
-        let mut columns: Vec<ValueVector> = (0..num_output_cols).map(|_| ValueVector::new()).collect();
+        let mut columns: Vec<ValueVector> =
+            (0..num_output_cols).map(|_| ValueVector::new()).collect();
 
         if self.group_by.is_empty() {
             // Global aggregation - single row output
@@ -360,11 +361,7 @@ impl PushOperator for AggregatePushOperator {
                 }
 
                 // Output aggregate results
-                for (i, (acc, expr)) in state
-                    .accumulators
-                    .iter()
-                    .zip(&self.aggregates)
-                    .enumerate()
+                for (i, (acc, expr)) in state.accumulators.iter().zip(&self.aggregates).enumerate()
                 {
                     columns[self.group_by.len() + i].push(acc.finalize(expr.function));
                 }
@@ -727,7 +724,8 @@ impl PushOperator for SpillableAggregatePushOperator {
 
     fn finalize(&mut self, sink: &mut dyn Sink) -> Result<(), OperatorError> {
         let num_output_cols = self.group_by.len() + self.aggregates.len();
-        let mut columns: Vec<ValueVector> = (0..num_output_cols).map(|_| ValueVector::new()).collect();
+        let mut columns: Vec<ValueVector> =
+            (0..num_output_cols).map(|_| ValueVector::new()).collect();
 
         if self.group_by.is_empty() {
             // Global aggregation - single row output
@@ -750,11 +748,8 @@ impl PushOperator for SpillableAggregatePushOperator {
                     }
 
                     // Output aggregate results
-                    for (i, (acc, expr)) in state
-                        .accumulators
-                        .iter()
-                        .zip(&self.aggregates)
-                        .enumerate()
+                    for (i, (acc, expr)) in
+                        state.accumulators.iter().zip(&self.aggregates).enumerate()
                     {
                         columns[self.group_by.len() + i].push(acc.finalize(expr.function));
                     }
@@ -769,11 +764,7 @@ impl PushOperator for SpillableAggregatePushOperator {
                 }
 
                 // Output aggregate results
-                for (i, (acc, expr)) in state
-                    .accumulators
-                    .iter()
-                    .zip(&self.aggregates)
-                    .enumerate()
+                for (i, (acc, expr)) in state.accumulators.iter().zip(&self.aggregates).enumerate()
                 {
                     columns[self.group_by.len() + i].push(acc.finalize(expr.function));
                 }
@@ -852,10 +843,8 @@ mod tests {
 
     #[test]
     fn test_global_min_max() {
-        let mut agg = AggregatePushOperator::global(vec![
-            AggregateExpr::min(0),
-            AggregateExpr::max(0),
-        ]);
+        let mut agg =
+            AggregatePushOperator::global(vec![AggregateExpr::min(0), AggregateExpr::max(0)]);
         let mut sink = CollectorSink::new();
 
         agg.push(create_test_chunk(&[3, 1, 4, 1, 5, 9, 2, 6]), &mut sink)
@@ -880,8 +869,11 @@ mod tests {
         let mut sink = CollectorSink::new();
 
         // Group 1: 10, 20 (sum=30), Group 2: 30, 40 (sum=70)
-        agg.push(create_two_column_chunk(&[1, 1, 2, 2], &[10, 20, 30, 40]), &mut sink)
-            .unwrap();
+        agg.push(
+            create_two_column_chunk(&[1, 1, 2, 2], &[10, 20, 30, 40]),
+            &mut sink,
+        )
+        .unwrap();
         agg.finalize(&mut sink).unwrap();
 
         let chunks = sink.into_chunks();
@@ -895,8 +887,11 @@ mod tests {
             .with_threshold(100);
         let mut sink = CollectorSink::new();
 
-        agg.push(create_two_column_chunk(&[1, 1, 2, 2], &[10, 20, 30, 40]), &mut sink)
-            .unwrap();
+        agg.push(
+            create_two_column_chunk(&[1, 1, 2, 2], &[10, 20, 30, 40]),
+            &mut sink,
+        )
+        .unwrap();
         agg.finalize(&mut sink).unwrap();
 
         let chunks = sink.into_chunks();
@@ -938,7 +933,10 @@ mod tests {
             }
         }
         sums.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(sums, vec![0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]);
+        assert_eq!(
+            sums,
+            vec![0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]
+        );
     }
 
     #[test]

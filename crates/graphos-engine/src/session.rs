@@ -60,7 +60,9 @@ impl Session {
     /// ```
     #[cfg(feature = "gql")]
     pub fn execute(&self, query: &str) -> Result<QueryResult> {
-        use crate::query::{binder::Binder, gql_translator, optimizer::Optimizer, Executor, Planner};
+        use crate::query::{
+            Executor, Planner, binder::Binder, gql_translator, optimizer::Optimizer,
+        };
 
         // Parse and translate the query to a logical plan
         let logical_plan = gql_translator::translate(query)?;
@@ -107,10 +109,8 @@ impl Session {
         let (viewing_epoch, tx_id) = self.get_transaction_context();
 
         // Create processor with transaction context
-        let processor = QueryProcessor::for_lpg_with_tx(
-            Arc::clone(&self.store),
-            Arc::clone(&self.tx_manager),
-        );
+        let processor =
+            QueryProcessor::for_lpg_with_tx(Arc::clone(&self.store), Arc::clone(&self.tx_manager));
 
         // Apply transaction context if in a transaction
         let processor = if let Some(tx_id) = tx_id {
@@ -157,7 +157,9 @@ impl Session {
     /// Returns an error if the query fails to parse or execute.
     #[cfg(feature = "cypher")]
     pub fn execute_cypher(&self, query: &str) -> Result<QueryResult> {
-        use crate::query::{binder::Binder, cypher_translator, optimizer::Optimizer, Executor, Planner};
+        use crate::query::{
+            Executor, Planner, binder::Binder, cypher_translator, optimizer::Optimizer,
+        };
 
         // Parse and translate the query to a logical plan
         let logical_plan = cypher_translator::translate(query)?;
@@ -209,7 +211,9 @@ impl Session {
     /// ```
     #[cfg(feature = "gremlin")]
     pub fn execute_gremlin(&self, query: &str) -> Result<QueryResult> {
-        use crate::query::{binder::Binder, gremlin_translator, optimizer::Optimizer, Executor, Planner};
+        use crate::query::{
+            Executor, Planner, binder::Binder, gremlin_translator, optimizer::Optimizer,
+        };
 
         // Parse and translate the query to a logical plan
         let logical_plan = gremlin_translator::translate(query)?;
@@ -256,10 +260,8 @@ impl Session {
         let (viewing_epoch, tx_id) = self.get_transaction_context();
 
         // Create processor with transaction context
-        let processor = QueryProcessor::for_lpg_with_tx(
-            Arc::clone(&self.store),
-            Arc::clone(&self.tx_manager),
-        );
+        let processor =
+            QueryProcessor::for_lpg_with_tx(Arc::clone(&self.store), Arc::clone(&self.tx_manager));
 
         // Apply transaction context if in a transaction
         let processor = if let Some(tx_id) = tx_id {
@@ -293,7 +295,9 @@ impl Session {
     /// ```
     #[cfg(feature = "graphql")]
     pub fn execute_graphql(&self, query: &str) -> Result<QueryResult> {
-        use crate::query::{binder::Binder, graphql_translator, optimizer::Optimizer, Executor, Planner};
+        use crate::query::{
+            Executor, Planner, binder::Binder, graphql_translator, optimizer::Optimizer,
+        };
 
         // Parse and translate the query to a logical plan
         let logical_plan = graphql_translator::translate(query)?;
@@ -340,10 +344,8 @@ impl Session {
         let (viewing_epoch, tx_id) = self.get_transaction_context();
 
         // Create processor with transaction context
-        let processor = QueryProcessor::for_lpg_with_tx(
-            Arc::clone(&self.store),
-            Arc::clone(&self.tx_manager),
-        );
+        let processor =
+            QueryProcessor::for_lpg_with_tx(Arc::clone(&self.store), Arc::clone(&self.tx_manager));
 
         // Apply transaction context if in a transaction
         let processor = if let Some(tx_id) = tx_id {
@@ -686,10 +688,8 @@ mod tests {
         let mut session = db.session();
         session.begin_tx().unwrap();
 
-        let node_in_tx = session.create_node_with_props(
-            &["Person"],
-            [("name", Value::String("Alice".into()))],
-        );
+        let node_in_tx =
+            session.create_node_with_props(&["Person"], [("name", Value::String("Alice".into()))]);
         assert!(node_in_tx.is_valid());
 
         // Should see 2 nodes

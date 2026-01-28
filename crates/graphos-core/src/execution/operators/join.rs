@@ -69,7 +69,12 @@ impl HashKey {
             Value::Map(map) => {
                 let mut keys: Vec<_> = map
                     .iter()
-                    .map(|(k, v)| HashKey::Composite(vec![HashKey::String(k.to_string()), HashKey::from_value(v)]))
+                    .map(|(k, v)| {
+                        HashKey::Composite(vec![
+                            HashKey::String(k.to_string()),
+                            HashKey::from_value(v),
+                        ])
+                    })
                     .collect();
                 keys.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
                 HashKey::Composite(keys)
@@ -182,7 +187,10 @@ impl HashJoinOperator {
 
                 // Skip null keys for inner/semi/anti joins
                 if matches!(key, HashKey::Null)
-                    && !matches!(self.join_type, JoinType::Left | JoinType::Right | JoinType::Full)
+                    && !matches!(
+                        self.join_type,
+                        JoinType::Left | JoinType::Right | JoinType::Full
+                    )
                 {
                     continue;
                 }
@@ -239,12 +247,12 @@ impl HashJoinOperator {
 
         // Copy probe side columns
         for col_idx in 0..probe_col_count {
-            let src_col = probe_chunk.column(col_idx).ok_or_else(|| {
-                OperatorError::ColumnNotFound(format!("probe column {col_idx}"))
-            })?;
-            let dst_col = builder.column_mut(col_idx).ok_or_else(|| {
-                OperatorError::ColumnNotFound(format!("output column {col_idx}"))
-            })?;
+            let src_col = probe_chunk
+                .column(col_idx)
+                .ok_or_else(|| OperatorError::ColumnNotFound(format!("probe column {col_idx}")))?;
+            let dst_col = builder
+                .column_mut(col_idx)
+                .ok_or_else(|| OperatorError::ColumnNotFound(format!("output column {col_idx}")))?;
 
             if let Some(value) = src_col.get_value(probe_row) {
                 dst_col.push_value(value);
@@ -260,12 +268,15 @@ impl HashJoinOperator {
                     let src_col = chunk.column(col_idx).ok_or_else(|| {
                         OperatorError::ColumnNotFound(format!("build column {col_idx}"))
                     })?;
-                    let dst_col = builder.column_mut(probe_col_count + col_idx).ok_or_else(|| {
-                        OperatorError::ColumnNotFound(format!(
-                            "output column {}",
-                            probe_col_count + col_idx
-                        ))
-                    })?;
+                    let dst_col =
+                        builder
+                            .column_mut(probe_col_count + col_idx)
+                            .ok_or_else(|| {
+                                OperatorError::ColumnNotFound(format!(
+                                    "output column {}",
+                                    probe_col_count + col_idx
+                                ))
+                            })?;
 
                     if let Some(value) = src_col.get_value(row) {
                         dst_col.push_value(value);
@@ -280,12 +291,14 @@ impl HashJoinOperator {
                     let build_col_count = self.build_chunks[0].column_count();
                     for col_idx in 0..build_col_count {
                         let dst_col =
-                            builder.column_mut(probe_col_count + col_idx).ok_or_else(|| {
-                                OperatorError::ColumnNotFound(format!(
-                                    "output column {}",
-                                    probe_col_count + col_idx
-                                ))
-                            })?;
+                            builder
+                                .column_mut(probe_col_count + col_idx)
+                                .ok_or_else(|| {
+                                    OperatorError::ColumnNotFound(format!(
+                                        "output column {}",
+                                        probe_col_count + col_idx
+                                    ))
+                                })?;
                         dst_col.push_value(Value::Null);
                     }
                 }
@@ -472,13 +485,7 @@ impl Operator for HashJoinOperator {
                 if self.current_matches.is_empty() {
                     // No matches - for left/full outer join, emit with nulls
                     if matches!(self.join_type, JoinType::Left | JoinType::Full) {
-                        self.produce_output_row(
-                            &mut builder,
-                            probe_chunk,
-                            probe_row,
-                            None,
-                            None,
-                        )?;
+                        self.produce_output_row(&mut builder, probe_chunk, probe_row, None, None)?;
                     }
                     self.current_probe_row += 1;
                     self.current_match_position = 0;
@@ -847,8 +854,7 @@ mod tests {
     impl Operator for MockOperator {
         fn next(&mut self) -> OperatorResult {
             if self.position < self.chunks.len() {
-                let chunk =
-                    std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
+                let chunk = std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
                 self.position += 1;
                 Ok(Some(chunk))
             } else {

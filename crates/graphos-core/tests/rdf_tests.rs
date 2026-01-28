@@ -198,13 +198,11 @@ mod parallel_tests {
 
     #[test]
     fn test_parallel_triple_source_reset() {
-        let triples = vec![
-            (
-                Value::String("s1".into()),
-                Value::String("p1".into()),
-                Value::String("o1".into()),
-            ),
-        ];
+        let triples = vec![(
+            Value::String("s1".into()),
+            Value::String("p1".into()),
+            Value::String("o1".into()),
+        )];
 
         let mut source = ParallelTripleScanSource::new(
             triples,

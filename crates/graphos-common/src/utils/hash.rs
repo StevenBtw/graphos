@@ -16,13 +16,13 @@ pub type FxHasher = AHasher;
 /// A fast hash builder using aHash.
 pub type FxBuildHasher = ahash::RandomState;
 
-/// A HashMap using fast hashing.
+/// A `HashMap` using fast hashing.
 pub type FxHashMap<K, V> = hashbrown::HashMap<K, V, FxBuildHasher>;
 
-/// A HashSet using fast hashing.
+/// A `HashSet` using fast hashing.
 pub type FxHashSet<T> = hashbrown::HashSet<T, FxBuildHasher>;
 
-/// Static RandomState used for consistent hashing within a program run.
+/// Static `RandomState` used for consistent hashing within a program run.
 static HASH_STATE: OnceLock<ahash::RandomState> = OnceLock::new();
 
 fn get_hash_state() -> &'static ahash::RandomState {
@@ -33,11 +33,9 @@ fn get_hash_state() -> &'static ahash::RandomState {
 ///
 /// The hash is consistent within a single program run but may vary between runs.
 #[inline]
+#[must_use]
 pub fn hash_one<T: std::hash::Hash>(value: &T) -> u64 {
-    let build_hasher = get_hash_state();
-    let mut hasher = build_hasher.build_hasher();
-    value.hash(&mut hasher);
-    hasher.finish()
+    get_hash_state().hash_one(value)
 }
 
 /// Computes a stable hash of the given bytes.
@@ -46,6 +44,7 @@ pub fn hash_one<T: std::hash::Hash>(value: &T) -> u64 {
 /// input across different runs of the program. Use this for persistent
 /// hashing (e.g., in WAL entries).
 #[inline]
+#[must_use]
 pub fn stable_hash(bytes: &[u8]) -> u64 {
     // Use a simple, stable hash function
     let mut hash: u64 = 0xcbf29ce4_84222325; // FNV offset basis
@@ -60,6 +59,7 @@ pub fn stable_hash(bytes: &[u8]) -> u64 {
 ///
 /// This is useful for combining hashes of multiple fields.
 #[inline]
+#[must_use]
 pub const fn combine_hashes(h1: u64, h2: u64) -> u64 {
     // Based on boost::hash_combine
     h1 ^ (h2

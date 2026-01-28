@@ -9,12 +9,12 @@ use std::sync::OnceLock;
 use graphos_common::types::{EdgeId, NodeId, Value};
 use graphos_common::utils::error::Result;
 use graphos_common::utils::hash::FxHashMap;
-use graphos_core::graph::lpg::LpgStore;
 use graphos_core::graph::Direction;
+use graphos_core::graph::lpg::LpgStore;
 
+use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
 use super::components::UnionFind;
 use super::traits::{GraphAlgorithm, MinScored};
-use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
 
 // ============================================================================
 // Edge Weight Extraction
@@ -104,7 +104,8 @@ pub fn kruskal(store: &LpgStore, weight_property: Option<&str>) -> MstResult {
 
     // Collect all edges with weights (treating as undirected)
     let mut edges: Vec<(f64, NodeId, NodeId, EdgeId)> = Vec::new();
-    let mut seen_edges: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let mut seen_edges: std::collections::HashSet<(usize, usize)> =
+        std::collections::HashSet::new();
 
     for &node in &nodes {
         let i = *node_to_idx.get(&node).unwrap();

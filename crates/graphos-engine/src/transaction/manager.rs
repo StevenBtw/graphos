@@ -611,7 +611,10 @@ mod tests {
         let result2 = mgr.commit(tx2);
         assert!(result2.is_err());
         assert!(
-            result2.unwrap_err().to_string().contains("Write-write conflict"),
+            result2
+                .unwrap_err()
+                .to_string()
+                .contains("Write-write conflict"),
             "Expected write-write conflict error"
         );
     }

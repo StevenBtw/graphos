@@ -5,8 +5,8 @@
 use crate::database::QueryResult;
 use graphos_common::types::{LogicalType, Value};
 use graphos_common::utils::error::{Error, Result};
-use graphos_core::execution::operators::{Operator, OperatorError};
 use graphos_core::execution::DataChunk;
+use graphos_core::execution::operators::{Operator, OperatorError};
 
 /// Executes a physical operator tree and collects results.
 pub struct Executor {

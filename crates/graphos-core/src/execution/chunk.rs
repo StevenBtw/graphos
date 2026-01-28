@@ -257,11 +257,7 @@ impl DataChunk {
         // Combine existing selection with predicate
         let selected: Vec<usize> = predicate
             .iter()
-            .filter(|&idx| {
-                self.selection
-                    .as_ref()
-                    .map_or(true, |s| s.contains(idx))
-            })
+            .filter(|&idx| self.selection.as_ref().map_or(true, |s| s.contains(idx)))
             .collect();
 
         let mut result_columns = Vec::with_capacity(self.columns.len());
@@ -499,7 +495,10 @@ mod tests {
         let letters = ["a", "b", "c", "d", "e"];
         for i in 0..5 {
             builder.column_mut(0).unwrap().push_int64(i);
-            builder.column_mut(1).unwrap().push_string(letters[i as usize]);
+            builder
+                .column_mut(1)
+                .unwrap()
+                .push_string(letters[i as usize]);
             builder.advance_row();
         }
 

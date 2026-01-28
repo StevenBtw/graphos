@@ -192,12 +192,8 @@ impl Histogram {
             // Check if bucket overlaps with range
             let bucket_in_range = match (lower, upper) {
                 (None, None) => true,
-                (Some(l), None) => {
-                    compare_values(&bucket.upper, l) != Some(Ordering::Less)
-                }
-                (None, Some(u)) => {
-                    compare_values(&bucket.lower, u) != Some(Ordering::Greater)
-                }
+                (Some(l), None) => compare_values(&bucket.upper, l) != Some(Ordering::Less),
+                (None, Some(u)) => compare_values(&bucket.lower, u) != Some(Ordering::Greater),
                 (Some(l), Some(u)) => {
                     compare_values(&bucket.upper, l) != Some(Ordering::Less)
                         && compare_values(&bucket.lower, u) != Some(Ordering::Greater)

@@ -9,8 +9,8 @@ use std::sync::Arc;
 use graphos_common::types::{EpochId, Value};
 use graphos_core::graph::lpg::LpgStore;
 use graphos_engine::{
-    transaction::{TransactionManager, TxState},
     GraphosDB,
+    transaction::{TransactionManager, TxState},
 };
 
 /// Helper to create a test store with some initial data.
@@ -20,11 +20,17 @@ fn create_test_store() -> Arc<LpgStore> {
     // Create some initial nodes
     let alice_id = store.create_node_with_props(
         &["Person"],
-        [("name", Value::String("Alice".into())), ("age", Value::Int64(30))],
+        [
+            ("name", Value::String("Alice".into())),
+            ("age", Value::Int64(30)),
+        ],
     );
     let bob_id = store.create_node_with_props(
         &["Person"],
-        [("name", Value::String("Bob".into())), ("age", Value::Int64(25))],
+        [
+            ("name", Value::String("Bob".into())),
+            ("age", Value::Int64(25)),
+        ],
     );
 
     // Create an edge
@@ -61,7 +67,11 @@ fn test_snapshot_isolation_reads_see_consistent_data() {
         .collect();
 
     // Should see initial 2 nodes, not the new one
-    assert_eq!(visible_at_epoch1.len(), 2, "T1 should only see 2 initial nodes");
+    assert_eq!(
+        visible_at_epoch1.len(),
+        2,
+        "T1 should only see 2 initial nodes"
+    );
 }
 
 #[test]
@@ -78,7 +88,10 @@ fn test_transaction_sees_own_writes() {
 
     // Transaction should see its own node
     let visible = store.get_node_versioned(node_id, epoch, tx1);
-    assert!(visible.is_some(), "Transaction should see its own uncommitted writes");
+    assert!(
+        visible.is_some(),
+        "Transaction should see its own uncommitted writes"
+    );
 }
 
 #[test]
@@ -99,7 +112,10 @@ fn test_committed_writes_visible_to_new_transactions() {
 
     // T2 should see T1's committed node
     let visible = store.get_node_versioned(node_id, epoch2, tx2);
-    assert!(visible.is_some(), "New transaction should see committed writes");
+    assert!(
+        visible.is_some(),
+        "New transaction should see committed writes"
+    );
 }
 
 // ============================================================================
@@ -127,7 +143,10 @@ fn test_write_write_conflict_detection() {
 
     // T2 should fail with conflict
     let result = tx_manager.commit(tx2);
-    assert!(result.is_err(), "Second transaction should fail with write-write conflict");
+    assert!(
+        result.is_err(),
+        "Second transaction should fail with write-write conflict"
+    );
 
     let err = result.unwrap_err();
     assert!(
@@ -156,7 +175,10 @@ fn test_non_overlapping_writes_succeed() {
 
     // Both should commit successfully
     assert!(tx_manager.commit(tx1).is_ok(), "T1 should commit");
-    assert!(tx_manager.commit(tx2).is_ok(), "T2 should commit (no conflict)");
+    assert!(
+        tx_manager.commit(tx2).is_ok(),
+        "T2 should commit (no conflict)"
+    );
 }
 
 // ============================================================================
@@ -186,7 +208,10 @@ fn test_rollback_makes_writes_invisible() {
     let epoch2 = tx_manager.current_epoch();
     let visible = store.get_node_versioned(node_id, epoch2, tx2);
 
-    assert!(visible.is_none(), "Aborted transaction's writes should not be visible");
+    assert!(
+        visible.is_none(),
+        "Aborted transaction's writes should not be visible"
+    );
 }
 
 #[test]
@@ -212,7 +237,10 @@ fn test_abort_releases_write_locks() {
     tx_manager.record_write(tx2, node_id).unwrap();
 
     // T2 should commit successfully
-    assert!(tx_manager.commit(tx2).is_ok(), "T2 should commit after T1 aborted");
+    assert!(
+        tx_manager.commit(tx2).is_ok(),
+        "T2 should commit after T1 aborted"
+    );
 }
 
 // ============================================================================
@@ -240,7 +268,10 @@ fn test_gc_cleans_up_completed_transactions() {
 
     // GC should clean them up
     let cleaned = tx_manager.gc();
-    assert_eq!(cleaned, 8, "GC should clean up all 8 completed transactions");
+    assert_eq!(
+        cleaned, 8,
+        "GC should clean up all 8 completed transactions"
+    );
 }
 
 // ============================================================================
@@ -257,14 +288,21 @@ fn test_session_transaction_isolation() {
     session.begin_tx().unwrap();
 
     // Create a node within transaction (using GQL INSERT syntax)
-    session.execute("INSERT (:TestIsolation {value: 42})").unwrap();
+    session
+        .execute("INSERT (:TestIsolation {value: 42})")
+        .unwrap();
 
     // Commit
     session.commit().unwrap();
 
     // Query should find the node
-    let result = session.execute("MATCH (n:TestIsolation) RETURN n.value").unwrap();
-    assert!(result.row_count() >= 1, "Node should be visible after commit");
+    let result = session
+        .execute("MATCH (n:TestIsolation) RETURN n.value")
+        .unwrap();
+    assert!(
+        result.row_count() >= 1,
+        "Node should be visible after commit"
+    );
 }
 
 #[test]
@@ -277,15 +315,24 @@ fn test_session_rollback_state() {
 
     // Begin transaction
     session.begin_tx().unwrap();
-    assert!(session.in_transaction(), "Should be in transaction after begin");
+    assert!(
+        session.in_transaction(),
+        "Should be in transaction after begin"
+    );
 
     // Rollback
     session.rollback().unwrap();
-    assert!(!session.in_transaction(), "Should not be in transaction after rollback");
+    assert!(
+        !session.in_transaction(),
+        "Should not be in transaction after rollback"
+    );
 
     // Should be able to begin a new transaction
     session.begin_tx().unwrap();
-    assert!(session.in_transaction(), "Should be able to begin new transaction");
+    assert!(
+        session.in_transaction(),
+        "Should be able to begin new transaction"
+    );
     session.commit().unwrap();
 }
 
@@ -301,7 +348,10 @@ fn test_empty_transaction_commits_successfully() {
     let tx = tx_manager.begin();
     let result = tx_manager.commit(tx);
 
-    assert!(result.is_ok(), "Empty transaction should commit successfully");
+    assert!(
+        result.is_ok(),
+        "Empty transaction should commit successfully"
+    );
 }
 
 #[test]
@@ -368,7 +418,11 @@ fn test_many_concurrent_transactions() {
         transactions.push((tx, node_id));
     }
 
-    assert_eq!(tx_manager.active_count(), 100, "Should have 100 active transactions");
+    assert_eq!(
+        tx_manager.active_count(),
+        100,
+        "Should have 100 active transactions"
+    );
 
     // Commit half, abort half
     for (i, (tx, _)) in transactions.iter().enumerate() {
@@ -379,7 +433,11 @@ fn test_many_concurrent_transactions() {
         }
     }
 
-    assert_eq!(tx_manager.active_count(), 0, "No active transactions after completion");
+    assert_eq!(
+        tx_manager.active_count(),
+        0,
+        "No active transactions after completion"
+    );
 
     // GC
     let cleaned = tx_manager.gc();
@@ -427,5 +485,8 @@ fn test_session_auto_commit_mode() {
     // Data should be visible immediately in new session
     let session2 = db.session();
     let result = session2.execute("MATCH (n:AutoCommit) RETURN n").unwrap();
-    assert!(result.row_count() >= 1, "Auto-committed data should be visible");
+    assert!(
+        result.row_count() >= 1,
+        "Auto-committed data should be visible"
+    );
 }

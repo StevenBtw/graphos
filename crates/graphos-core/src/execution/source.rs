@@ -66,7 +66,10 @@ impl VectorSource {
 
     /// Create from node IDs.
     pub fn from_node_ids(ids: Vec<NodeId>) -> Self {
-        let values: Vec<Value> = ids.into_iter().map(|id| Value::Int64(id.0 as i64)).collect();
+        let values: Vec<Value> = ids
+            .into_iter()
+            .map(|id| Value::Int64(id.0 as i64))
+            .collect();
         Self::single_column(values)
     }
 }

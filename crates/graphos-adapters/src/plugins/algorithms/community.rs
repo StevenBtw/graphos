@@ -8,11 +8,11 @@ use std::sync::OnceLock;
 use graphos_common::types::{NodeId, Value};
 use graphos_common::utils::error::Result;
 use graphos_common::utils::hash::{FxHashMap, FxHashSet};
-use graphos_core::graph::lpg::LpgStore;
 use graphos_core::graph::Direction;
+use graphos_core::graph::lpg::LpgStore;
 
-use super::traits::{ComponentResultBuilder, GraphAlgorithm};
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
+use super::traits::{ComponentResultBuilder, GraphAlgorithm};
 
 // ============================================================================
 // Label Propagation
@@ -50,7 +50,11 @@ pub fn label_propagation(store: &LpgStore, max_iterations: usize) -> FxHashMap<N
         labels.insert(node, idx as u64);
     }
 
-    let max_iter = if max_iterations == 0 { n * 10 } else { max_iterations };
+    let max_iter = if max_iterations == 0 {
+        n * 10
+    } else {
+        max_iterations
+    };
 
     for _ in 0..max_iter {
         let mut changed = false;
@@ -203,9 +207,7 @@ pub fn louvain(store: &LpgStore, resolution: f64) -> LouvainResult {
     }
 
     // Compute node degrees (sum of incident edge weights)
-    let degrees: Vec<f64> = (0..n)
-        .map(|i| weights[i].values().sum())
-        .collect();
+    let degrees: Vec<f64> = (0..n).map(|i| weights[i].values().sum()).collect();
 
     // Initialize: each node in its own community
     let mut community: Vec<usize> = (0..n).collect();
@@ -251,7 +253,11 @@ pub fn louvain(store: &LpgStore, resolution: f64) -> LouvainResult {
 
                 // Modularity delta for moving to target_comm
                 let delta = resolution
-                    * (k_i_to_comm - ki_in - ki * (sigma_tot - community_total.get(&current_comm).unwrap_or(&0.0) + ki) / (2.0 * total_weight));
+                    * (k_i_to_comm
+                        - ki_in
+                        - ki * (sigma_tot - community_total.get(&current_comm).unwrap_or(&0.0)
+                            + ki)
+                            / (2.0 * total_weight));
 
                 if delta > best_delta {
                     best_delta = delta;
@@ -315,9 +321,7 @@ fn compute_modularity(
         return 0.0;
     }
 
-    let degrees: Vec<f64> = (0..n)
-        .map(|i| weights[i].values().sum())
-        .collect();
+    let degrees: Vec<f64> = (0..n).map(|i| weights[i].values().sum()).collect();
 
     let mut modularity = 0.0;
 

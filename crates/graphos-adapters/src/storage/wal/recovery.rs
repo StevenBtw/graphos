@@ -85,7 +85,10 @@ impl WalRecovery {
     /// # Errors
     ///
     /// Returns an error if recovery fails.
-    pub fn recover_from_checkpoint(&self, checkpoint: Option<&CheckpointMetadata>) -> Result<Vec<WalRecord>> {
+    pub fn recover_from_checkpoint(
+        &self,
+        checkpoint: Option<&CheckpointMetadata>,
+    ) -> Result<Vec<WalRecord>> {
         self.recover_internal(checkpoint.cloned())
     }
 
@@ -116,8 +119,12 @@ impl WalRecovery {
             // We include the checkpoint sequence file because it may contain
             // records after the checkpoint record itself
             if sequence < min_sequence {
-                tracing::debug!("Skipping log file {:?} (sequence {} < checkpoint {})",
-                    log_file, sequence, min_sequence);
+                tracing::debug!(
+                    "Skipping log file {:?} (sequence {} < checkpoint {})",
+                    log_file,
+                    sequence,
+                    min_sequence
+                );
                 continue;
             }
 
@@ -190,20 +197,18 @@ impl WalRecovery {
 
         loop {
             match self.read_record(&mut reader) {
-                Ok(Some(record)) => {
-                    match &record {
-                        WalRecord::TxCommit { .. } => {
-                            committed_records.append(&mut current_tx_records);
-                            committed_records.push(record);
-                        }
-                        WalRecord::TxAbort { .. } => {
-                            current_tx_records.clear();
-                        }
-                        _ => {
-                            current_tx_records.push(record);
-                        }
+                Ok(Some(record)) => match &record {
+                    WalRecord::TxCommit { .. } => {
+                        committed_records.append(&mut current_tx_records);
+                        committed_records.push(record);
                     }
-                }
+                    WalRecord::TxAbort { .. } => {
+                        current_tx_records.clear();
+                    }
+                    _ => {
+                        current_tx_records.push(record);
+                    }
+                },
                 Ok(None) => break,
                 Err(e) => {
                     tracing::warn!("WAL corruption detected: {}", e);
@@ -353,7 +358,10 @@ mod tests {
                 })
                 .unwrap();
             }
-            wal.log(&WalRecord::TxCommit { tx_id: TxId::new(1) }).unwrap();
+            wal.log(&WalRecord::TxCommit {
+                tx_id: TxId::new(1),
+            })
+            .unwrap();
 
             // Second transaction
             for i in 5..10 {
@@ -363,7 +371,10 @@ mod tests {
                 })
                 .unwrap();
             }
-            wal.log(&WalRecord::TxCommit { tx_id: TxId::new(2) }).unwrap();
+            wal.log(&WalRecord::TxCommit {
+                tx_id: TxId::new(2),
+            })
+            .unwrap();
 
             wal.sync().unwrap();
         }
@@ -392,7 +403,10 @@ mod tests {
                 labels: vec!["Test".to_string()],
             })
             .unwrap();
-            wal.log(&WalRecord::TxCommit { tx_id: TxId::new(1) }).unwrap();
+            wal.log(&WalRecord::TxCommit {
+                tx_id: TxId::new(1),
+            })
+            .unwrap();
 
             // Create checkpoint
             wal.checkpoint(TxId::new(1), EpochId::new(10)).unwrap();
@@ -403,7 +417,10 @@ mod tests {
                 labels: vec!["Test".to_string()],
             })
             .unwrap();
-            wal.log(&WalRecord::TxCommit { tx_id: TxId::new(2) }).unwrap();
+            wal.log(&WalRecord::TxCommit {
+                tx_id: TxId::new(2),
+            })
+            .unwrap();
 
             wal.sync().unwrap();
         }
@@ -420,8 +437,8 @@ mod tests {
 
     #[test]
     fn test_recovery_from_checkpoint() {
-        use graphos_common::types::EpochId;
         use super::super::WalConfig;
+        use graphos_common::types::EpochId;
 
         let dir = tempdir().unwrap();
 
@@ -441,7 +458,10 @@ mod tests {
                 })
                 .unwrap();
             }
-            wal.log(&WalRecord::TxCommit { tx_id: TxId::new(1) }).unwrap();
+            wal.log(&WalRecord::TxCommit {
+                tx_id: TxId::new(1),
+            })
+            .unwrap();
 
             // Create checkpoint
             wal.checkpoint(TxId::new(1), EpochId::new(100)).unwrap();
@@ -454,7 +474,10 @@ mod tests {
                 })
                 .unwrap();
             }
-            wal.log(&WalRecord::TxCommit { tx_id: TxId::new(2) }).unwrap();
+            wal.log(&WalRecord::TxCommit {
+                tx_id: TxId::new(2),
+            })
+            .unwrap();
 
             wal.sync().unwrap();
         }

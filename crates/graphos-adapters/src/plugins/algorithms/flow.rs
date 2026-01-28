@@ -9,11 +9,11 @@ use std::sync::OnceLock;
 use graphos_common::types::{EdgeId, NodeId, Value};
 use graphos_common::utils::error::{Error, Result};
 use graphos_common::utils::hash::FxHashMap;
-use graphos_core::graph::lpg::LpgStore;
 use graphos_core::graph::Direction;
+use graphos_core::graph::lpg::LpgStore;
 
-use super::traits::GraphAlgorithm;
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
+use super::traits::GraphAlgorithm;
 
 // ============================================================================
 // Property Extraction

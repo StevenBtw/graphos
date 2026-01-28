@@ -237,9 +237,9 @@ mod tests {
     fn test_bump_many_small_allocations() {
         let bump = BumpAllocator::new();
 
-        for i in 0..10_000 {
-            let v = bump.alloc(i as u64);
-            assert_eq!(*v, i as u64);
+        for i in 0u64..10_000u64 {
+            let v = bump.alloc(i);
+            assert_eq!(*v, i);
         }
 
         assert_eq!(bump.allocation_count(), 10_000);

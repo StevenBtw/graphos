@@ -1,8 +1,6 @@
 //! Execution memory context for memory-aware query execution.
 
-use graphos_common::memory::buffer::{
-    BufferManager, MemoryGrant, MemoryRegion, PressureLevel,
-};
+use graphos_common::memory::buffer::{BufferManager, MemoryGrant, MemoryRegion, PressureLevel};
 use std::sync::Arc;
 
 /// Default chunk size for execution buffers.
@@ -45,7 +43,9 @@ impl ExecutionMemoryContext {
     ///
     /// Returns `None` if the allocation cannot be satisfied.
     pub fn allocate(&mut self, size: usize) -> Option<MemoryGrant> {
-        let grant = self.manager.try_allocate(size, MemoryRegion::ExecutionBuffers)?;
+        let grant = self
+            .manager
+            .try_allocate(size, MemoryRegion::ExecutionBuffers)?;
         self.allocated += size;
         Some(grant)
     }
@@ -54,7 +54,10 @@ impl ExecutionMemoryContext {
     ///
     /// The grant will be released when this context is dropped.
     pub fn allocate_tracked(&mut self, size: usize) -> bool {
-        if let Some(grant) = self.manager.try_allocate(size, MemoryRegion::ExecutionBuffers) {
+        if let Some(grant) = self
+            .manager
+            .try_allocate(size, MemoryRegion::ExecutionBuffers)
+        {
             self.allocated += size;
             self.grants.push(grant);
             true

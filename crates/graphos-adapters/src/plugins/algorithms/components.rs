@@ -6,8 +6,8 @@
 use graphos_common::types::{NodeId, Value};
 use graphos_common::utils::error::Result;
 use graphos_common::utils::hash::{FxHashMap, FxHashSet};
-use graphos_core::graph::lpg::LpgStore;
 use graphos_core::graph::Direction;
+use graphos_core::graph::lpg::LpgStore;
 
 use super::super::{AlgorithmResult, ParameterDef, Parameters};
 use super::traits::{ComponentResultBuilder, GraphAlgorithm};
@@ -432,23 +432,16 @@ impl GraphAlgorithm for TopologicalSortAlgorithm {
     fn execute(&self, store: &LpgStore, _params: &Parameters) -> Result<AlgorithmResult> {
         match topological_sort(store) {
             Some(order) => {
-                let mut result = AlgorithmResult::new(vec![
-                    "node_id".to_string(),
-                    "order".to_string(),
-                ]);
+                let mut result =
+                    AlgorithmResult::new(vec!["node_id".to_string(), "order".to_string()]);
                 for (idx, node) in order.iter().enumerate() {
-                    result.add_row(vec![
-                        Value::Int64(node.0 as i64),
-                        Value::Int64(idx as i64),
-                    ]);
+                    result.add_row(vec![Value::Int64(node.0 as i64), Value::Int64(idx as i64)]);
                 }
                 Ok(result)
             }
             None => {
                 // Return empty result with error indication for cycles
-                let mut result = AlgorithmResult::new(vec![
-                    "error".to_string(),
-                ]);
+                let mut result = AlgorithmResult::new(vec!["error".to_string()]);
                 result.add_row(vec![Value::String("Graph contains a cycle".into())]);
                 Ok(result)
             }
@@ -569,11 +562,8 @@ mod tests {
         assert_eq!(order.len(), 5);
 
         // Verify topological property: if there's an edge u -> v, u comes before v
-        let position: FxHashMap<NodeId, usize> = order
-            .iter()
-            .enumerate()
-            .map(|(i, &n)| (n, i))
-            .collect();
+        let position: FxHashMap<NodeId, usize> =
+            order.iter().enumerate().map(|(i, &n)| (n, i)).collect();
 
         for &node in &order {
             for (neighbor, _) in store.edges_from(node, Direction::Outgoing) {

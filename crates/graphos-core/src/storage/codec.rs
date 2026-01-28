@@ -256,7 +256,9 @@ impl TypeSpecificCompressor {
                     codec: CompressionCodec::BitPacked { bits },
                     uncompressed_size: values.len() * 8,
                     data: packed.to_bytes(),
-                    metadata: CompressionMetadata::BitPacked { count: values.len() },
+                    metadata: CompressionMetadata::BitPacked {
+                        count: values.len(),
+                    },
                 }
             }
             _ => unreachable!("Unexpected codec for integers"),
@@ -266,7 +268,10 @@ impl TypeSpecificCompressor {
     /// Compresses i64 values using the optimal codec.
     pub fn compress_signed_integers(values: &[i64]) -> CompressedData {
         // Convert to u64 using zig-zag encoding
-        let zigzag: Vec<u64> = values.iter().map(|&v| super::delta::zigzag_encode(v)).collect();
+        let zigzag: Vec<u64> = values
+            .iter()
+            .map(|&v| super::delta::zigzag_encode(v))
+            .collect();
         Self::compress_integers(&zigzag)
     }
 
@@ -277,7 +282,9 @@ impl TypeSpecificCompressor {
             codec: CompressionCodec::BitVector,
             uncompressed_size: values.len(),
             data: bitvec.to_bytes(),
-            metadata: CompressionMetadata::BitPacked { count: values.len() },
+            metadata: CompressionMetadata::BitPacked {
+                count: values.len(),
+            },
         }
     }
 

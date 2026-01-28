@@ -8,8 +8,8 @@ use std::collections::HashSet;
 use graphos_common::types::{LogicalType, Value};
 
 use super::{Operator, OperatorResult};
-use crate::execution::chunk::DataChunkBuilder;
 use crate::execution::DataChunk;
+use crate::execution::chunk::DataChunkBuilder;
 
 /// A row key for duplicate detection.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -169,8 +169,7 @@ mod tests {
     impl Operator for MockOperator {
         fn next(&mut self) -> OperatorResult {
             if self.position < self.chunks.len() {
-                let chunk =
-                    std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
+                let chunk = std::mem::replace(&mut self.chunks[self.position], DataChunk::empty());
                 self.position += 1;
                 Ok(Some(chunk))
             } else {
@@ -221,7 +220,12 @@ mod tests {
         while let Some(chunk) = distinct.next().unwrap() {
             for row in chunk.selected_indices() {
                 let num = chunk.column(0).unwrap().get_int64(row).unwrap();
-                let text = chunk.column(1).unwrap().get_string(row).unwrap().to_string();
+                let text = chunk
+                    .column(1)
+                    .unwrap()
+                    .get_string(row)
+                    .unwrap()
+                    .to_string();
                 results.push((num, text));
             }
         }

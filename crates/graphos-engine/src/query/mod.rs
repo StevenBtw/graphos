@@ -45,8 +45,8 @@ pub use executor::Executor;
 pub use optimizer::{CardinalityEstimator, Optimizer};
 pub use plan::{LogicalExpression, LogicalOperator, LogicalPlan};
 pub use planner::{
-    convert_aggregate_function, convert_binary_op, convert_filter_expression, convert_unary_op,
-    PhysicalPlan, Planner,
+    PhysicalPlan, Planner, convert_aggregate_function, convert_binary_op,
+    convert_filter_expression, convert_unary_op,
 };
 pub use processor::{QueryLanguage, QueryParams, QueryProcessor};
 

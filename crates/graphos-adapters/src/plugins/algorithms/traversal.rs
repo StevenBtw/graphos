@@ -9,11 +9,11 @@ use std::sync::OnceLock;
 use graphos_common::types::{NodeId, Value};
 use graphos_common::utils::error::Result;
 use graphos_common::utils::hash::{FxHashMap, FxHashSet};
-use graphos_core::graph::lpg::LpgStore;
 use graphos_core::graph::Direction;
+use graphos_core::graph::lpg::LpgStore;
 
-use super::traits::{Control, GraphAlgorithm, NodeValueResultBuilder, TraversalEvent};
 use super::super::{AlgorithmResult, ParameterDef, ParameterType, Parameters};
+use super::traits::{Control, GraphAlgorithm, NodeValueResultBuilder, TraversalEvent};
 
 // ============================================================================
 // BFS Implementation
@@ -296,7 +296,8 @@ where
                     Control::Continue => {}
                 }
 
-                let neighbor_neighbors: Vec<_> = store.edges_from(neighbor, Direction::Outgoing).collect();
+                let neighbor_neighbors: Vec<_> =
+                    store.edges_from(neighbor, Direction::Outgoing).collect();
                 stack.push((neighbor, neighbor_neighbors, 0));
             }
             NodeColor::Gray => {
@@ -392,19 +393,16 @@ impl GraphAlgorithm for BfsAlgorithm {
     }
 
     fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
-        let start_id = params
-            .get_int("start")
-            .ok_or_else(|| graphos_common::utils::error::Error::InvalidValue(
+        let start_id = params.get_int("start").ok_or_else(|| {
+            graphos_common::utils::error::Error::InvalidValue(
                 "start parameter required".to_string(),
-            ))?;
+            )
+        })?;
 
         let start = NodeId::new(start_id as u64);
         let layers = bfs_layers(store, start);
 
-        let mut result = AlgorithmResult::new(vec![
-            "node_id".to_string(),
-            "distance".to_string(),
-        ]);
+        let mut result = AlgorithmResult::new(vec!["node_id".to_string(), "distance".to_string()]);
 
         for (distance, layer) in layers.iter().enumerate() {
             for &node in layer {
@@ -451,11 +449,11 @@ impl GraphAlgorithm for DfsAlgorithm {
     }
 
     fn execute(&self, store: &LpgStore, params: &Parameters) -> Result<AlgorithmResult> {
-        let start_id = params
-            .get_int("start")
-            .ok_or_else(|| graphos_common::utils::error::Error::InvalidValue(
+        let start_id = params.get_int("start").ok_or_else(|| {
+            graphos_common::utils::error::Error::InvalidValue(
                 "start parameter required".to_string(),
-            ))?;
+            )
+        })?;
 
         let start = NodeId::new(start_id as u64);
         let finished = dfs(store, start);

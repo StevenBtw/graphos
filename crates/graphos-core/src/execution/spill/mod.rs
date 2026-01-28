@@ -27,5 +27,5 @@ pub use async_manager::AsyncSpillManager;
 pub use external_sort::{ExternalSort, NullOrder, SortDirection, SortKey};
 pub use file::{SpillFile, SpillFileReader};
 pub use manager::SpillManager;
-pub use partition::{PartitionedState, DEFAULT_NUM_PARTITIONS};
+pub use partition::{DEFAULT_NUM_PARTITIONS, PartitionedState};
 pub use serializer::{deserialize_row, deserialize_value, serialize_row, serialize_value};

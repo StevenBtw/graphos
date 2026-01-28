@@ -310,9 +310,15 @@ mod tests {
         let mut distinct = DistinctPushOperator::new();
         let mut sink = CollectorSink::new();
 
-        distinct.push(create_test_chunk(&[1, 2, 3]), &mut sink).unwrap();
-        distinct.push(create_test_chunk(&[2, 3, 4]), &mut sink).unwrap();
-        distinct.push(create_test_chunk(&[3, 4, 5]), &mut sink).unwrap();
+        distinct
+            .push(create_test_chunk(&[1, 2, 3]), &mut sink)
+            .unwrap();
+        distinct
+            .push(create_test_chunk(&[2, 3, 4]), &mut sink)
+            .unwrap();
+        distinct
+            .push(create_test_chunk(&[3, 4, 5]), &mut sink)
+            .unwrap();
         distinct.finalize(&mut sink).unwrap();
 
         assert_eq!(sink.row_count(), 5); // 1, 2, 3, 4, 5

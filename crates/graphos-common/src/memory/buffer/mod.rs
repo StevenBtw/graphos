@@ -51,7 +51,7 @@ mod manager;
 mod region;
 mod stats;
 
-pub use consumer::{priorities, ConsumerStats, MemoryConsumer, SpillError};
+pub use consumer::{ConsumerStats, MemoryConsumer, SpillError, priorities};
 pub use grant::{CompositeGrant, GrantReleaser, MemoryGrant};
 pub use manager::{BufferManager, BufferManagerConfig};
 pub use region::MemoryRegion;

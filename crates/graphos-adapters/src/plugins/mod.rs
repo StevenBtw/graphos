@@ -7,11 +7,9 @@
 //!
 //! - [`algorithms`] - Graph algorithms (BFS, DFS, components, centrality, etc.)
 
+pub mod algorithms;
 mod registry;
 mod traits;
-pub mod algorithms;
 
 pub use registry::PluginRegistry;
-pub use traits::{
-    Algorithm, AlgorithmResult, ParameterDef, ParameterType, Parameters, Plugin,
-};
+pub use traits::{Algorithm, AlgorithmResult, ParameterDef, ParameterType, Parameters, Plugin};
