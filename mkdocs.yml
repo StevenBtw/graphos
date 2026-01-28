@@ -1,10 +1,11 @@
 # Project Information
 site_name: Graphos
 site_url: https://graphos.tech
-site_author: Steven
+site_author: S.T. Grond
 site_description: >-
   A pure-Rust, high-performance, embeddable graph database with Python bindings.
-  Uses GQL (ISO standard) as its query language.
+  Supports LPG and RDF data models, multiple query languages (GQL, Cypher,
+  Gremlin, GraphQL, SPARQL), ACID transactions, and extensible storage backends.
 
 # Repository
 repo_name: StevenBtw/graphos
@@ -12,7 +13,7 @@ repo_url: https://github.com/StevenBtw/graphos
 edit_uri: edit/main/docs/
 
 # Copyright
-copyright: Copyright &copy; 2024-2026 Steven - Apache-2.0 License
+copyright: Copyright &copy; 2026 S.T. Grond - Apache-2.0 License
 
 # Theme Configuration
 theme:

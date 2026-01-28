@@ -7,7 +7,7 @@ Thank you for your interest in contributing to Graphos! This document provides g
 ### Prerequisites
 
 - Rust 1.91.1 or later
-- Python 3.9+ (for Python bindings)
+- Python 3.12+ (for Python bindings)
 - Git
 
 ### Setup
@@ -26,6 +26,7 @@ For detailed architecture documentation, see [.claude/ARCHITECTURE.md](.claude/A
 
 | Crate              | Purpose                                        |
 | ------------------ | ---------------------------------------------- |
+| `graphos`          | Top-level facade, re-exports public API        |
 | `graphos-common`   | Foundation types, memory allocators, utilities |
 | `graphos-core`     | LPG storage, indexes, execution engine         |
 | `graphos-adapters` | GQL parser, storage backends, plugins          |
@@ -79,8 +80,7 @@ See [.claude/IMPLEMENTATION_PLAN.md](.claude/IMPLEMENTATION_PLAN.md) for the det
 
 ### Documentation
 
-- All public items must have doc comments
-- Use `#![warn(missing_docs)]` in lib.rs files
+- All public items should have doc comments
 - Include examples in doc comments for complex APIs
 
 ### Error Handling

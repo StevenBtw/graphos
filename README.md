@@ -1,9 +1,14 @@
 # Graphos
 
+[![CI](https://github.com/StevenBtw/graphos/actions/workflows/ci.yml/badge.svg)](https://github.com/StevenBtw/graphos/actions/workflows/ci.yml)
+[![Docs](https://github.com/StevenBtw/graphos/actions/workflows/docs.yml/badge.svg)](https://github.com/StevenBtw/graphos/actions/workflows/docs.yml)
+[![codecov](https://codecov.io/gh/StevenBtw/graphos/graph/badge.svg)](https://codecov.io/gh/StevenBtw/graphos)
 [![Crates.io](https://img.shields.io/crates/v/graphos.svg)](https://crates.io/crates/graphos)
 [![PyPI](https://img.shields.io/pypi/v/pygraphos.svg)](https://pypi.org/project/pygraphos/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-graphos.tech-blue)](https://graphos.tech)
+[![MSRV](https://img.shields.io/badge/MSRV-1.91.1-blue)](https://www.rust-lang.org)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org)
 
 A pure-Rust, high-performance, embeddable graph database supporting both **Labeled Property Graph (LPG)** and **RDF** data models.
 
@@ -43,16 +48,16 @@ Graphos uses a modular translator architecture where query languages are parsed 
 ### Rust
 
 ```bash
-cargo add graphos-engine
+cargo add graphos
 ```
 
 With additional query languages:
 
 ```bash
-cargo add graphos-engine --features cypher   # Add Cypher support
-cargo add graphos-engine --features gremlin  # Add Gremlin support
-cargo add graphos-engine --features graphql  # Add GraphQL support
-cargo add graphos-engine --features full     # All query languages
+cargo add graphos --features cypher   # Add Cypher support
+cargo add graphos --features gremlin  # Add Gremlin support
+cargo add graphos --features graphql  # Add GraphQL support
+cargo add graphos --features full     # All query languages
 ```
 
 ### Python
@@ -101,7 +106,7 @@ print(f"Created node with ID: {node.id}")
 ### Rust
 
 ```rust
-use graphos_engine::GraphosDB;
+use graphos::GraphosDB;
 
 fn main() {
     // Create an in-memory database
