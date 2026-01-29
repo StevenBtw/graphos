@@ -20,7 +20,7 @@ use grafeo_core::execution::operators::{
     JoinType as PhysicalJoinType, LimitOperator, MergeOperator, NullOrder, Operator, ProjectExpr,
     ProjectOperator, PropertySource, RemoveLabelOperator, ScanOperator, SetPropertyOperator,
     SimpleAggregateOperator, SkipOperator, SortDirection, SortKey as PhysicalSortKey, SortOperator,
-    UnaryFilterOp, UnionOperator, UnwindOperator,
+    UnaryFilterOp, UnionOperator, UnwindOperator, VariableLengthExpandOperator,
 };
 use grafeo_core::graph::{Direction, lpg::LpgStore};
 use std::collections::HashMap;
@@ -187,17 +187,36 @@ impl Planner {
             ExpandDirection::Both => Direction::Both,
         };
 
-        // Create the expand operator with MVCC context
-        let expand_op = ExpandOperator::new(
-            Arc::clone(&self.store),
-            input_op,
-            source_column,
-            direction,
-            expand.edge_type.clone(),
-        )
-        .with_tx_context(self.viewing_epoch, self.tx_id);
+        // Check if this is a variable-length path
+        let is_variable_length =
+            expand.min_hops != 1 || expand.max_hops.is_none() || expand.max_hops != Some(1);
 
-        let operator: Box<dyn Operator> = Box::new(expand_op);
+        let operator: Box<dyn Operator> = if is_variable_length {
+            // Use VariableLengthExpandOperator for multi-hop paths
+            let max_hops = expand.max_hops.unwrap_or(expand.min_hops + 10); // Default max if unlimited
+            let expand_op = VariableLengthExpandOperator::new(
+                Arc::clone(&self.store),
+                input_op,
+                source_column,
+                direction,
+                expand.edge_type.clone(),
+                expand.min_hops,
+                max_hops,
+            )
+            .with_tx_context(self.viewing_epoch, self.tx_id);
+            Box::new(expand_op)
+        } else {
+            // Use simple ExpandOperator for single-hop paths
+            let expand_op = ExpandOperator::new(
+                Arc::clone(&self.store),
+                input_op,
+                source_column,
+                direction,
+                expand.edge_type.clone(),
+            )
+            .with_tx_context(self.viewing_epoch, self.tx_id);
+            Box::new(expand_op)
+        };
 
         // Build output columns: [input_columns..., edge, target]
         // Preserve all input columns and add edge + target to match ExpandOperator output
