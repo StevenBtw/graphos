@@ -1,12 +1,15 @@
 //! Query language parsers.
 //!
-//! This module provides parsers for different query languages:
+//! Each parser turns query text into Grafeo's internal representation.
+//! Enable what you need via feature flags - only GQL is on by default.
 //!
-//! - [`gql`] - GQL parser (ISO/IEC 39075:2024)
-//! - [`cypher`] - Cypher parser (openCypher 9.0, feature-gated)
-//! - [`sparql`] - SPARQL parser (W3C SPARQL 1.1, feature-gated)
-//! - [`gremlin`] - Gremlin parser (Apache TinkerPop, feature-gated)
-//! - [`graphql`] - GraphQL parser (spec-compliant, feature-gated)
+//! | Module | Language | Standard | Feature |
+//! | ------ | -------- | -------- | ------- |
+//! | [`gql`] | GQL | ISO/IEC 39075:2024 | `gql` (default) |
+//! | [`cypher`] | Cypher | openCypher 9.0 | `cypher` |
+//! | [`sparql`] | SPARQL | W3C SPARQL 1.1 | `sparql` |
+//! | [`gremlin`] | Gremlin | Apache TinkerPop | `gremlin` |
+//! | [`graphql`] | GraphQL | June 2018 spec | `graphql` |
 
 #[cfg(feature = "gql")]
 pub mod gql;

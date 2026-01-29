@@ -1,12 +1,12 @@
-//! Index structures for efficient graph queries.
+//! Index structures that make queries fast.
 //!
-//! This module provides various index structures:
+//! Different indexes for different access patterns:
 //!
-//! - [`adjacency`] - Chunked adjacency lists with delta buffers
-//! - [`hash`] - Hash index for primary key lookups
-//! - [`btree`] - BTree index for range queries
-//! - [`trie`] - Trie index for WCOJ (Worst-Case Optimal Joins)
-//! - [`zone_map`] - Zone maps for data skipping during scans
+//! - [`adjacency`] - Traversing neighbors (the bread and butter of graph queries)
+//! - [`hash`] - Point lookups by ID or property value (O(1) average)
+//! - [`btree`] - Range queries like "age > 30" (O(log n))
+//! - [`trie`] - Multi-way joins for complex patterns (worst-case optimal)
+//! - [`zone_map`] - Skip entire chunks when filtering (great for large scans)
 
 pub mod adjacency;
 pub mod btree;

@@ -1,7 +1,31 @@
-//! Python bindings for Grafeo graph database.
+//! Python bindings for Grafeo.
 //!
-//! This crate provides Python bindings via PyO3, exposing the core
-//! graph database functionality to Python users.
+//! This crate wraps the Rust graph database for Python users. You get the
+//! same performance as the Rust API, with a Pythonic interface.
+//!
+//! ## Quick Start (Python)
+//!
+//! ```python
+//! from grafeo import GrafeoDB
+//!
+//! # Create an in-memory database
+//! db = GrafeoDB.new_in_memory()
+//!
+//! # Add some data
+//! db.execute("INSERT (:Person {name: 'Alice', age: 30})")
+//!
+//! # Query it
+//! result = db.execute("MATCH (p:Person) RETURN p.name")
+//! for row in result:
+//!     print(row)
+//! ```
+//!
+//! ## Interop
+//!
+//! Grafeo plays nicely with the Python data science ecosystem:
+//! - Convert to NetworkX for graph algorithms
+//! - Export to pandas DataFrames
+//! - Use with OR-Tools for optimization
 
 #![warn(missing_docs)]
 

@@ -1,4 +1,7 @@
-//! Python database interface.
+//! The main Python interface to Grafeo.
+//!
+//! [`PyGrafeoDB`] is what Python users interact with - it wraps the Rust
+//! database and exposes a Pythonic API.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -98,7 +101,10 @@ impl AsyncQueryResultIter {
     }
 }
 
-/// Python wrapper for GrafeoDB.
+/// Your handle to a Grafeo database from Python.
+///
+/// Create one with `GrafeoDB()` for in-memory or `GrafeoDB(path)` for
+/// persistent storage. Then use `execute()` to run queries.
 #[pyclass(name = "GrafeoDB")]
 pub struct PyGrafeoDB {
     inner: Arc<RwLock<GrafeoDB>>,
@@ -106,7 +112,11 @@ pub struct PyGrafeoDB {
 
 #[pymethods]
 impl PyGrafeoDB {
-    /// Create a new in-memory database.
+    /// Creates a database. Pass a path for persistence, or omit for in-memory.
+    ///
+    /// Examples:
+    ///     db = GrafeoDB()           # In-memory (fast, temporary)
+    ///     db = GrafeoDB("./mydb")   # Persistent (survives restarts)
     #[new]
     #[pyo3(signature = (path=None))]
     fn new(path: Option<String>) -> PyResult<Self> {
@@ -134,7 +144,10 @@ impl PyGrafeoDB {
         })
     }
 
-    /// Execute a GQL query.
+    /// Runs a GQL query and returns the results.
+    ///
+    /// Use params for parameterized queries to avoid injection:
+    ///     result = db.execute("MATCH (p:Person {name: $name}) RETURN p", {"name": "Alice"})
     #[pyo3(signature = (query, params=None))]
     fn execute(
         &self,

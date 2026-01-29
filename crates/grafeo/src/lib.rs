@@ -2,24 +2,37 @@
 //!
 //! A high-performance, pure-Rust, embeddable graph database.
 //!
-//! Grafeo supports multiple query languages through feature flags:
+//! If you're new here, start with [`GrafeoDB`] - that's your entry point for
+//! creating databases and running queries. Grafeo uses GQL (the ISO standard)
+//! by default, but you can enable other query languages through feature flags.
 //!
-//! - **GQL** (ISO standard, default) — `gql` feature
-//! - **Cypher** — `cypher` feature
-//! - **SPARQL** — `sparql` feature
-//! - **Gremlin** — `gremlin` feature
-//! - **GraphQL** — `graphql` feature
+//! ## Query Languages
 //!
-//! Enable all with the `full` feature.
+//! | Feature | Language | Notes |
+//! | ------- | -------- | ----- |
+//! | `gql` | GQL | ISO standard, enabled by default |
+//! | `cypher` | Cypher | Neo4j-style queries |
+//! | `sparql` | SPARQL | For RDF triple stores |
+//! | `gremlin` | Gremlin | Apache TinkerPop traversals |
+//! | `graphql` | GraphQL | Schema-based queries |
+//!
+//! Use the `full` feature to enable everything.
 //!
 //! ## Quick Start
 //!
 //! ```rust
 //! use grafeo::GrafeoDB;
 //!
+//! // Create an in-memory database
 //! let db = GrafeoDB::new_in_memory();
 //! let session = db.session();
-//! let result = session.execute("INSERT (:Person {name: 'Alice'})");
+//!
+//! // Add a person
+//! session.execute("INSERT (:Person {name: 'Alice', age: 30})")?;
+//!
+//! // Find them
+//! let result = session.execute("MATCH (p:Person) RETURN p.name")?;
+//! # Ok::<(), grafeo_common::utils::error::Error>(())
 //! ```
 
 // Re-export the main database API
@@ -27,5 +40,5 @@ pub use grafeo_engine::{
     Catalog, CatalogError, Config, GrafeoDB, IndexDefinition, IndexType, Session,
 };
 
-// Re-export core types for advanced usage
+// Re-export core types - you'll need these for working with IDs and values
 pub use grafeo_common::types::{EdgeId, NodeId, Value};

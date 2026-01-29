@@ -1,16 +1,19 @@
 //! # grafeo-engine
 //!
-//! The main entry point for Grafeo: database management, transactions,
-//! query processing, and optimization.
+//! The engine behind Grafeo. You'll find everything here for creating databases,
+//! running queries, and managing transactions.
+//!
+//! Most users should start with the main `grafeo` crate, which re-exports the
+//! key types. If you're here directly, [`GrafeoDB`] is your entry point.
 //!
 //! ## Modules
 //!
-//! - [`database`] - GrafeoDB struct and lifecycle management
-//! - [`session`] - Session/Connection management
-//! - [`config`] - Configuration options
-//! - [`transaction`] - Transaction management and MVCC
-//! - [`query`] - Query processing, binding, planning, optimization, execution
-//! - [`catalog`] - Schema and index catalog
+//! - [`database`] - Create and manage databases with [`GrafeoDB`]
+//! - [`session`] - Lightweight handles for concurrent access
+//! - [`config`] - Tune memory, threads, and durability settings
+//! - [`transaction`] - MVCC transaction management (snapshot isolation)
+//! - [`query`] - The full query pipeline: parsing, planning, optimization, execution
+//! - [`catalog`] - Schema metadata: labels, property keys, indexes
 
 pub mod catalog;
 pub mod config;

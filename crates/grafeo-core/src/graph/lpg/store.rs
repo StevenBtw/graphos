@@ -1,4 +1,8 @@
-//! LPG graph store implementation.
+//! The in-memory LPG graph store.
+//!
+//! This is where nodes and edges actually live. Most users interact with
+//! this through [`GrafeoDB`](grafeo_engine::GrafeoDB), but if you need
+//! direct access for algorithms, here it is.
 
 use super::property::CompareOp;
 use super::{Edge, EdgeRecord, Node, NodeRecord, PropertyStorage};
@@ -34,10 +38,14 @@ impl Default for LpgStoreConfig {
     }
 }
 
-/// The main LPG graph store.
+/// The core LPG graph storage.
 ///
-/// This is the core storage for labeled property graphs, providing
-/// efficient node/edge storage and adjacency indexing.
+/// Holds all nodes, edges, properties, and indexes in memory. Designed for
+/// concurrent reads with MVCC versioning so queries don't block each other.
+///
+/// For most use cases, interact through [`GrafeoDB`](grafeo_engine::GrafeoDB).
+/// Direct access is useful for algorithm implementations that need raw
+/// adjacency traversal.
 pub struct LpgStore {
     /// Configuration.
     #[allow(dead_code)]
