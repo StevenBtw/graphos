@@ -1,10 +1,10 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+requires = ["maturin>=1.11.5"]
 build-backend = "maturin"
 
 [project]
 name = "Grafeo"
-version = "0.1.1"
+version = "0.1.2"
 description = "A high-performance, embeddable graph database with Python bindings"
 readme = "README.md"
 license = { text = "Apache-2.0" }
