@@ -884,6 +884,63 @@ impl ExpressionPredicate {
                 let has_label = node.labels.iter().any(|l| l.as_ref() == label.as_ref());
                 Some(Value::Bool(has_label))
             }
+            "head" => {
+                // head(list) - returns the first element of a list
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::List(items) => items.first().cloned(),
+                    _ => None,
+                }
+            }
+            "tail" => {
+                // tail(list) - returns all elements except the first
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::List(items) => {
+                        if items.is_empty() {
+                            Some(Value::List(vec![].into()))
+                        } else {
+                            Some(Value::List(items[1..].to_vec().into()))
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            "last" => {
+                // last(list) - returns the last element of a list
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::List(items) => items.last().cloned(),
+                    _ => None,
+                }
+            }
+            "reverse" => {
+                // reverse(list) - returns the list in reverse order
+                if args.len() != 1 {
+                    return None;
+                }
+                let val = self.eval_expr(&args[0], chunk, row)?;
+                match val {
+                    Value::List(items) => {
+                        let reversed: Vec<Value> = items.iter().rev().cloned().collect();
+                        Some(Value::List(reversed.into()))
+                    }
+                    Value::String(s) => {
+                        let reversed: String = s.chars().rev().collect();
+                        Some(Value::String(reversed.into()))
+                    }
+                    _ => None,
+                }
+            }
             _ => None, // Unknown function
         }
     }

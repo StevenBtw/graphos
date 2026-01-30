@@ -30,7 +30,7 @@ Use graph patterns to detect potentially fraudulent activity.
 ```python
 import grafeo
 
-db = grafeo.Database()
+db = grafeo.GrafeoDB()
 ```
 
 ## Create Transaction Data

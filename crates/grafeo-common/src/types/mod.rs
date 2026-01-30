@@ -1,9 +1,12 @@
-//! Core type definitions for Grafeo.
+//! The core types you'll work with in Grafeo.
 //!
-//! This module contains all fundamental types used throughout the graph database:
-//! - Identifier types ([`NodeId`], [`EdgeId`], [`TxId`], [`EpochId`])
-//! - Property types ([`Value`], [`PropertyKey`], [`LogicalType`])
-//! - Temporal types ([`Timestamp`])
+//! Most of these are re-exported from the main `grafeo` crate, so you rarely
+//! need to import from here directly.
+//!
+//! - **IDs**: [`NodeId`], [`EdgeId`] - handles to graph elements
+//! - **Values**: [`Value`] - the dynamic type for properties
+//! - **Keys**: [`PropertyKey`] - interned property names
+//! - **Time**: [`Timestamp`] - for temporal properties
 
 mod id;
 mod logical_type;

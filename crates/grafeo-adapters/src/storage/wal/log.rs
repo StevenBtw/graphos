@@ -442,6 +442,36 @@ impl WalManager {
         *self.checkpoint_epoch.lock()
     }
 
+    /// Returns the total size of all WAL files in bytes.
+    #[must_use]
+    pub fn size_bytes(&self) -> usize {
+        let mut total = 0usize;
+        if let Ok(files) = self.log_files() {
+            for file in files {
+                if let Ok(metadata) = fs::metadata(&file) {
+                    total += metadata.len() as usize;
+                }
+            }
+        }
+        // Also include checkpoint metadata file
+        let metadata_path = self.dir.join(CHECKPOINT_METADATA_FILE);
+        if let Ok(metadata) = fs::metadata(&metadata_path) {
+            total += metadata.len() as usize;
+        }
+        total
+    }
+
+    /// Returns the timestamp of the last checkpoint (Unix epoch seconds), if any.
+    #[must_use]
+    pub fn last_checkpoint_timestamp(&self) -> Option<u64> {
+        if let Ok(Some(metadata)) = self.read_checkpoint_metadata() {
+            // Convert milliseconds to seconds
+            Some(metadata.timestamp_ms / 1000)
+        } else {
+            None
+        }
+    }
+
     // === Private methods ===
 
     fn ensure_active_log(&self) -> Result<()> {

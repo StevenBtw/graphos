@@ -16,16 +16,16 @@ Learn how to create and configure Grafeo databases in Python.
 import grafeo
 
 # In-memory database
-db = grafeo.Database()
+db = grafeo.GrafeoDB()
 
 # Persistent database
-db = grafeo.Database(path="my_graph.db")
+db = grafeo.GrafeoDB(path="my_graph.db")
 ```
 
 ## Configuration Options
 
 ```python
-db = grafeo.Database(
+db = grafeo.GrafeoDB(
     path="my_graph.db",
     memory_limit=4 * 1024 * 1024 * 1024,  # 4 GB
     threads=8,
@@ -37,7 +37,7 @@ db = grafeo.Database(
 
 ```python
 # Create database
-db = grafeo.Database(path="my_graph.db")
+db = grafeo.GrafeoDB(path="my_graph.db")
 
 # Use the database
 with db.session() as session:
@@ -51,7 +51,7 @@ db.close()
 
 ```python
 # Database as context manager
-with grafeo.Database(path="my_graph.db") as db:
+with grafeo.GrafeoDB(path="my_graph.db") as db:
     with db.session() as session:
         session.execute("INSERT (:Person {name: 'Alice'})")
 # Database is automatically closed
@@ -60,7 +60,7 @@ with grafeo.Database(path="my_graph.db") as db:
 ## Multiple Sessions
 
 ```python
-db = grafeo.Database()
+db = grafeo.GrafeoDB()
 
 # Create multiple sessions for concurrent access
 session1 = db.session()

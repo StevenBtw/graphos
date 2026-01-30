@@ -1,9 +1,7 @@
-//! Utility functions and helpers.
+//! Common utilities used throughout Grafeo.
 //!
-//! This module provides common utilities used throughout Grafeo:
-//!
-//! - [`error`] - Error types and result aliases
-//! - [`hash`] - Fast hashing utilities
+//! - [`error`] - Error types like [`Error`] and [`QueryError`](error::QueryError)
+//! - [`hash`] - Fast hashing with FxHash (non-cryptographic)
 
 pub mod error;
 pub mod hash;

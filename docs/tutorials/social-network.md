@@ -27,7 +27,7 @@ In this tutorial, you'll build a social network with users, friendships, posts, 
 ```python
 import grafeo
 
-db = grafeo.Database()
+db = grafeo.GrafeoDB()
 ```
 
 ## Step 1: Create Users

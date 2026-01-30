@@ -26,6 +26,40 @@ pub enum TokenKind {
     /// DESCRIBE keyword.
     Describe,
 
+    // SPARQL Update keywords
+    /// INSERT keyword.
+    Insert,
+    /// DELETE keyword.
+    Delete,
+    /// DATA keyword.
+    Data,
+    /// WITH keyword.
+    With,
+    /// INTO keyword.
+    Into,
+    /// USING keyword.
+    Using,
+    /// DEFAULT keyword.
+    Default,
+    /// ALL keyword.
+    All,
+    /// LOAD keyword.
+    Load,
+    /// CLEAR keyword.
+    Clear,
+    /// DROP keyword.
+    Drop,
+    /// CREATE keyword.
+    Create,
+    /// COPY keyword.
+    Copy,
+    /// MOVE keyword.
+    Move,
+    /// ADD keyword.
+    Add,
+    /// TO keyword.
+    To,
+
     // Prologue keywords
     /// PREFIX keyword.
     Prefix,
@@ -690,6 +724,22 @@ impl<'a> Lexer<'a> {
             "CONSTRUCT" => TokenKind::Construct,
             "ASK" => TokenKind::Ask,
             "DESCRIBE" => TokenKind::Describe,
+            "INSERT" => TokenKind::Insert,
+            "DELETE" => TokenKind::Delete,
+            "DATA" => TokenKind::Data,
+            "WITH" => TokenKind::With,
+            "INTO" => TokenKind::Into,
+            "USING" => TokenKind::Using,
+            "DEFAULT" => TokenKind::Default,
+            "ALL" => TokenKind::All,
+            "LOAD" => TokenKind::Load,
+            "CLEAR" => TokenKind::Clear,
+            "DROP" => TokenKind::Drop,
+            "CREATE" => TokenKind::Create,
+            "COPY" => TokenKind::Copy,
+            "MOVE" => TokenKind::Move,
+            "ADD" => TokenKind::Add,
+            "TO" => TokenKind::To,
             "PREFIX" => TokenKind::Prefix,
             "BASE" => TokenKind::Base,
             "WHERE" => TokenKind::Where,

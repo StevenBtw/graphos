@@ -418,6 +418,7 @@ mod tests {
             min_hops: 1,
             max_hops: Some(1),
             input: Box::new(LogicalOperator::Empty),
+            path_alias: None,
         };
         let cost = model.expand_cost(&expand, 1000.0);
 
@@ -494,15 +495,18 @@ mod tests {
                     expression: None,
                     distinct: false,
                     alias: Some("cnt".to_string()),
+                    percentile: None,
                 },
                 AggregateExpr {
                     function: AggregateFunction::Sum,
                     expression: Some(LogicalExpression::Variable("x".to_string())),
                     distinct: false,
                     alias: Some("total".to_string()),
+                    percentile: None,
                 },
             ],
             input: Box::new(LogicalOperator::Empty),
+            having: None,
         };
         let cost = model.aggregate_cost(&agg, 1000.0);
 
@@ -516,6 +520,7 @@ mod tests {
         let model = CostModel::new();
         let distinct = DistinctOp {
             input: Box::new(LogicalOperator::Empty),
+            columns: None,
         };
         let cost = model.distinct_cost(&distinct, 1000.0);
 

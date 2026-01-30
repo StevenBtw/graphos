@@ -74,6 +74,10 @@ theme:
     text: Inter
     code: JetBrains Mono
 
+# Hooks
+hooks:
+  - docs/hooks/copy_markdown.py
+
 # Plugins
 plugins:
   - search:
@@ -169,6 +173,7 @@ nav:
     - Quick Start: getting-started/quickstart.md
     - Your First Graph: getting-started/first-graph.md
     - Configuration: getting-started/configuration.md
+    - Command-Line Interface: getting-started/cli.md
 
   - User Guide:
     - user-guide/index.md
@@ -316,5 +321,6 @@ nav:
     - Testing: contributing/testing.md
     - Pull Requests: contributing/pull-requests.md
 
+  - Roadmap: roadmap.md
   - Changelog: changelog.md
   - Tags: tags.md

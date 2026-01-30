@@ -1,4 +1,7 @@
-//! DataChunk for batched tuple processing.
+//! DataChunk - the fundamental unit of vectorized execution.
+//!
+//! A DataChunk holds a batch of rows in columnar format. Processing data in
+//! batches (typically 1024-2048 rows) lets the CPU stay busy and enables SIMD.
 
 use super::selection::SelectionVector;
 use super::vector::ValueVector;
@@ -7,11 +10,30 @@ use grafeo_common::types::LogicalType;
 /// Default chunk size (number of tuples).
 pub const DEFAULT_CHUNK_SIZE: usize = 2048;
 
-/// A chunk of data containing multiple columns.
+/// A batch of rows stored column-wise for vectorized processing.
 ///
-/// DataChunk is the fundamental unit of data processing in vectorized execution.
-/// It holds multiple ValueVectors (columns) and an optional SelectionVector
-/// for filtering without copying.
+/// Instead of storing rows like `[(a1,b1), (a2,b2), ...]`, we store columns
+/// like `[a1,a2,...], [b1,b2,...]`. This is cache-friendly for analytical
+/// queries that touch few columns but many rows.
+///
+/// The optional `SelectionVector` lets you filter rows without copying data -
+/// just mark which row indices are "selected".
+///
+/// # Example
+///
+/// ```
+/// use grafeo_core::execution::DataChunk;
+/// use grafeo_core::execution::ValueVector;
+/// use grafeo_common::types::Value;
+///
+/// // Create columns
+/// let names = ValueVector::from_values(&[Value::from("Alice"), Value::from("Bob")]);
+/// let ages = ValueVector::from_values(&[Value::from(30i64), Value::from(25i64)]);
+///
+/// // Bundle into a chunk
+/// let chunk = DataChunk::new(vec![names, ages]);
+/// assert_eq!(chunk.len(), 2);
+/// ```
 #[derive(Debug)]
 pub struct DataChunk {
     /// Column vectors.

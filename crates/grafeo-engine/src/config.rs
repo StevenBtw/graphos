@@ -28,6 +28,76 @@ pub struct Config {
 
     /// Whether to enable query logging.
     pub query_logging: bool,
+
+    /// Adaptive execution configuration.
+    pub adaptive: AdaptiveConfig,
+}
+
+/// Configuration for adaptive query execution.
+///
+/// Adaptive execution monitors actual row counts during query processing and
+/// can trigger re-optimization when estimates are significantly wrong.
+#[derive(Debug, Clone)]
+pub struct AdaptiveConfig {
+    /// Whether adaptive execution is enabled.
+    pub enabled: bool,
+
+    /// Deviation threshold that triggers re-optimization.
+    ///
+    /// A value of 3.0 means re-optimization is triggered when actual cardinality
+    /// is more than 3x or less than 1/3x the estimated value.
+    pub threshold: f64,
+
+    /// Minimum number of rows before considering re-optimization.
+    ///
+    /// Helps avoid thrashing on small result sets.
+    pub min_rows: u64,
+
+    /// Maximum number of re-optimizations allowed per query.
+    pub max_reoptimizations: usize,
+}
+
+impl Default for AdaptiveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            threshold: 3.0,
+            min_rows: 1000,
+            max_reoptimizations: 3,
+        }
+    }
+}
+
+impl AdaptiveConfig {
+    /// Creates a disabled adaptive config.
+    #[must_use]
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            ..Default::default()
+        }
+    }
+
+    /// Sets the deviation threshold.
+    #[must_use]
+    pub fn with_threshold(mut self, threshold: f64) -> Self {
+        self.threshold = threshold;
+        self
+    }
+
+    /// Sets the minimum rows before re-optimization.
+    #[must_use]
+    pub fn with_min_rows(mut self, min_rows: u64) -> Self {
+        self.min_rows = min_rows;
+        self
+    }
+
+    /// Sets the maximum number of re-optimizations.
+    #[must_use]
+    pub fn with_max_reoptimizations(mut self, max: usize) -> Self {
+        self.max_reoptimizations = max;
+        self
+    }
 }
 
 impl Default for Config {
@@ -41,6 +111,7 @@ impl Default for Config {
             wal_flush_interval_ms: 100,
             backward_edges: true,
             query_logging: false,
+            adaptive: AdaptiveConfig::default(),
         }
     }
 }
@@ -107,6 +178,20 @@ impl Config {
     #[must_use]
     pub fn with_spill_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.spill_path = Some(path.into());
+        self
+    }
+
+    /// Sets the adaptive execution configuration.
+    #[must_use]
+    pub fn with_adaptive(mut self, adaptive: AdaptiveConfig) -> Self {
+        self.adaptive = adaptive;
+        self
+    }
+
+    /// Disables adaptive execution.
+    #[must_use]
+    pub fn without_adaptive(mut self) -> Self {
+        self.adaptive.enabled = false;
         self
     }
 }

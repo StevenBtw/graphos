@@ -1,37 +1,92 @@
-//! Session management.
+//! Lightweight handles for database interaction.
+//!
+//! A session is your conversation with the database. Each session can have
+//! its own transaction state, so concurrent sessions don't interfere with
+//! each other. Sessions are cheap to create - spin up as many as you need.
 
 use std::sync::Arc;
 
 use grafeo_common::types::{EpochId, NodeId, TxId, Value};
 use grafeo_common::utils::error::Result;
 use grafeo_core::graph::lpg::LpgStore;
+#[cfg(feature = "rdf")]
+use grafeo_core::graph::rdf::RdfStore;
 
+use crate::config::AdaptiveConfig;
 use crate::database::QueryResult;
 use crate::transaction::TransactionManager;
 
-/// A session for interacting with the database.
+/// Your handle to the database - execute queries and manage transactions.
 ///
-/// Sessions provide isolation between concurrent users and
-/// manage transaction state.
+/// Get one from [`GrafeoDB::session()`](crate::GrafeoDB::session). Each session
+/// tracks its own transaction state, so you can have multiple concurrent
+/// sessions without them interfering.
 pub struct Session {
     /// The underlying store.
     store: Arc<LpgStore>,
+    /// RDF triple store (if RDF feature is enabled).
+    #[cfg(feature = "rdf")]
+    #[allow(dead_code)]
+    rdf_store: Arc<RdfStore>,
     /// Transaction manager.
     tx_manager: Arc<TransactionManager>,
     /// Current transaction ID (if any).
     current_tx: Option<TxId>,
     /// Whether the session is in auto-commit mode.
     auto_commit: bool,
+    /// Adaptive execution configuration.
+    #[allow(dead_code)]
+    adaptive_config: AdaptiveConfig,
 }
 
 impl Session {
     /// Creates a new session.
+    #[allow(dead_code)]
     pub(crate) fn new(store: Arc<LpgStore>, tx_manager: Arc<TransactionManager>) -> Self {
         Self {
             store,
+            #[cfg(feature = "rdf")]
+            rdf_store: Arc::new(RdfStore::new()),
             tx_manager,
             current_tx: None,
             auto_commit: true,
+            adaptive_config: AdaptiveConfig::default(),
+        }
+    }
+
+    /// Creates a new session with adaptive execution configuration.
+    #[allow(dead_code)]
+    pub(crate) fn with_adaptive(
+        store: Arc<LpgStore>,
+        tx_manager: Arc<TransactionManager>,
+        adaptive_config: AdaptiveConfig,
+    ) -> Self {
+        Self {
+            store,
+            #[cfg(feature = "rdf")]
+            rdf_store: Arc::new(RdfStore::new()),
+            tx_manager,
+            current_tx: None,
+            auto_commit: true,
+            adaptive_config,
+        }
+    }
+
+    /// Creates a new session with RDF store and adaptive configuration.
+    #[cfg(feature = "rdf")]
+    pub(crate) fn with_rdf_store_and_adaptive(
+        store: Arc<LpgStore>,
+        rdf_store: Arc<RdfStore>,
+        tx_manager: Arc<TransactionManager>,
+        adaptive_config: AdaptiveConfig,
+    ) -> Self {
+        Self {
+            store,
+            rdf_store,
+            tx_manager,
+            current_tx: None,
+            auto_commit: true,
+            adaptive_config,
         }
     }
 
@@ -355,6 +410,49 @@ impl Session {
         };
 
         processor.process(query, QueryLanguage::GraphQL, Some(&params))
+    }
+
+    /// Executes a SPARQL query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails to parse or execute.
+    #[cfg(all(feature = "sparql", feature = "rdf"))]
+    pub fn execute_sparql(&self, query: &str) -> Result<QueryResult> {
+        use crate::query::{
+            Executor, optimizer::Optimizer, planner_rdf::RdfPlanner, sparql_translator,
+        };
+
+        // Parse and translate the SPARQL query to a logical plan
+        let logical_plan = sparql_translator::translate(query)?;
+
+        // Optimize the plan
+        let optimizer = Optimizer::new();
+        let optimized_plan = optimizer.optimize(logical_plan)?;
+
+        // Convert to physical plan using RDF planner
+        let planner = RdfPlanner::new(Arc::clone(&self.rdf_store));
+        let mut physical_plan = planner.plan(&optimized_plan)?;
+
+        // Execute the plan
+        let executor = Executor::with_columns(physical_plan.columns.clone());
+        executor.execute(physical_plan.operator.as_mut())
+    }
+
+    /// Executes a SPARQL query with parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails to parse or execute.
+    #[cfg(all(feature = "sparql", feature = "rdf"))]
+    pub fn execute_sparql_with_params(
+        &self,
+        query: &str,
+        _params: std::collections::HashMap<String, Value>,
+    ) -> Result<QueryResult> {
+        // TODO: Implement parameter substitution for SPARQL
+        // For now, just execute the query without parameters
+        self.execute_sparql(query)
     }
 
     /// Begins a new transaction.

@@ -1,13 +1,15 @@
 //! MVCC (Multi-Version Concurrency Control) primitives.
 //!
-//! This module provides the version chain and visibility logic
-//! for concurrent read/write access to graph data.
+//! This is how Grafeo handles concurrent reads and writes without blocking.
+//! Each entity has a [`VersionChain`] that tracks all versions. Readers see
+//! consistent snapshots, writers create new versions, and old versions get
+//! garbage collected when no one needs them anymore.
 
 use std::collections::VecDeque;
 
 use crate::types::{EpochId, TxId};
 
-/// Visibility information for a version.
+/// Tracks when a version was created and deleted for visibility checks.
 #[derive(Debug, Clone, Copy)]
 pub struct VersionInfo {
     /// The epoch this version was created in.
@@ -89,10 +91,11 @@ impl<T> Version<T> {
     }
 }
 
-/// A chain of versions for a single entity.
+/// All versions of a single entity, newest first.
 ///
-/// Versions are stored newest-first for efficient access to recent versions.
-/// Old versions can be garbage collected when no active transactions can see them.
+/// Each node/edge has one of these tracking its version history. Use
+/// [`visible_at()`](Self::visible_at) to get the version at a specific epoch,
+/// or [`visible_to()`](Self::visible_to) for transaction-aware visibility.
 #[derive(Debug, Clone)]
 pub struct VersionChain<T> {
     /// Versions ordered newest-first.

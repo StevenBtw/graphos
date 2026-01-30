@@ -1,10 +1,11 @@
-//! Epoch-based arena allocator for structural sharing.
+//! Epoch-based arena allocator for MVCC.
 //!
-//! The arena allocator is the core memory management strategy for Grafeo.
-//! It provides:
-//! - Fast bump-pointer allocation
-//! - Epoch-based versioning for MVCC
-//! - Bulk deallocation when epochs become unreachable
+//! This is how Grafeo manages memory for versioned data. Each epoch gets its
+//! own arena, and when all readers from an old epoch finish, we free the whole
+//! thing at once. Much faster than tracking individual allocations.
+//!
+//! Use [`ArenaAllocator`] to manage multiple epochs, or [`Arena`] directly
+//! if you're working with a single epoch.
 
 // Arena allocators require unsafe code for memory management
 #![allow(unsafe_code)]
@@ -100,11 +101,13 @@ impl Drop for Chunk {
 unsafe impl Send for Chunk {}
 unsafe impl Sync for Chunk {}
 
-/// An epoch-aware arena allocator.
+/// A single epoch's memory arena.
 ///
-/// The arena allocates memory in large chunks and uses bump-pointer allocation
-/// for fast allocation. Each arena is associated with an epoch, enabling
-/// structural sharing for MVCC.
+/// Allocates by bumping a pointer forward - extremely fast. You can't free
+/// individual allocations; instead, drop the whole arena when the epoch
+/// is no longer needed.
+///
+/// Thread-safe: multiple threads can allocate concurrently using atomics.
 pub struct Arena {
     /// The epoch this arena belongs to.
     epoch: EpochId,
@@ -247,7 +250,10 @@ pub struct ArenaStats {
     pub total_used: usize,
 }
 
-/// The global arena allocator managing multiple epochs.
+/// Manages arenas across multiple epochs.
+///
+/// Use this to create new epochs, allocate in the current epoch, and
+/// clean up old epochs when they're no longer needed.
 pub struct ArenaAllocator {
     /// Map of epochs to arenas.
     arenas: RwLock<hashbrown::HashMap<EpochId, Arena>>,

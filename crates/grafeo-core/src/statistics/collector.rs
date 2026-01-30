@@ -1,7 +1,8 @@
-//! Statistics collection and storage.
+//! Collecting and storing graph statistics.
 //!
-//! This module provides structures for collecting and storing
-//! statistics about graph data for query optimization.
+//! Use [`StatisticsCollector`] to stream values through and build statistics,
+//! or construct [`ColumnStatistics`] directly if you already know the numbers.
+//! The [`Statistics`] struct holds everything the optimizer needs.
 
 use super::histogram::Histogram;
 use grafeo_common::types::Value;
@@ -10,7 +11,10 @@ use std::collections::HashMap;
 /// A property key identifier.
 pub type PropertyKey = String;
 
-/// Statistics for the entire database.
+/// Everything the optimizer knows about the data - cardinalities, distributions, degrees.
+///
+/// This is the main struct the query planner consults when choosing between
+/// different execution strategies.
 #[derive(Debug, Clone, Default)]
 pub struct Statistics {
     /// Per-label statistics.
@@ -112,7 +116,7 @@ impl Statistics {
     }
 }
 
-/// Statistics for a single label (node type).
+/// Statistics for nodes with a particular label (like "Person" or "Company").
 #[derive(Debug, Clone)]
 pub struct LabelStatistics {
     /// Number of nodes with this label.
@@ -153,7 +157,7 @@ impl LabelStatistics {
 /// Alias for table statistics (used in relational contexts).
 pub type TableStatistics = LabelStatistics;
 
-/// Statistics for an edge type.
+/// Statistics for edges of a particular type (like "KNOWS" or "WORKS_AT").
 #[derive(Debug, Clone)]
 pub struct EdgeTypeStatistics {
     /// Number of edges of this type.
@@ -184,7 +188,7 @@ impl EdgeTypeStatistics {
     }
 }
 
-/// Statistics for a column/property.
+/// Detailed statistics about a property's values - min, max, histogram, null ratio.
 #[derive(Debug, Clone)]
 pub struct ColumnStatistics {
     /// Number of distinct values.
@@ -342,7 +346,10 @@ fn estimate_linear_range(min: &Value, max: &Value, lower: &Value, upper: &Value)
     }
 }
 
-/// Builder for collecting statistics from data.
+/// Streams values through to build statistics automatically.
+///
+/// Call [`add()`](Self::add) for each value, then [`build()`](Self::build)
+/// to get the final [`ColumnStatistics`] with histogram and most common values.
 #[allow(dead_code)]
 pub struct StatisticsCollector {
     /// Values collected for histogram building.

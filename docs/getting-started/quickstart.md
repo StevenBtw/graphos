@@ -15,10 +15,10 @@ This guide will get you up and running with Grafeo in just a few minutes.
     import grafeo
 
     # Create an in-memory database
-    db = grafeo.Database()
+    db = grafeo.GrafeoDB()
 
     # Or create a persistent database
-    db = grafeo.Database(path="my_graph.db")
+    db = grafeo.GrafeoDB(path="my_graph.db")
     ```
 
 === "Rust"

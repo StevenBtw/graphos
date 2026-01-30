@@ -1,12 +1,32 @@
 //! Edge types for the LPG model.
+//!
+//! Like nodes, edges have two forms: [`Edge`] is the user-friendly version,
+//! [`EdgeRecord`] is the compact storage format.
 
 use grafeo_common::types::{EdgeId, EpochId, NodeId, PropertyKey, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// An edge in the labeled property graph.
+/// A relationship between two nodes, with a type and optional properties.
 ///
-/// This is the high-level representation of an edge with all its data.
+/// Think of edges as the "verbs" in your graph - KNOWS, WORKS_AT, PURCHASED.
+/// Each edge connects exactly one source node to one destination node.
+///
+/// # Example
+///
+/// ```
+/// use grafeo_core::graph::lpg::Edge;
+/// use grafeo_common::types::{EdgeId, NodeId};
+///
+/// let mut works_at = Edge::new(
+///     EdgeId::new(1),
+///     NodeId::new(10),  // Alice
+///     NodeId::new(20),  // Acme Corp
+///     "WORKS_AT"
+/// );
+/// works_at.set_property("since", 2020i64);
+/// works_at.set_property("role", "Engineer");
+/// ```
 #[derive(Debug, Clone)]
 pub struct Edge {
     /// Unique identifier.
@@ -50,9 +70,10 @@ impl Edge {
         self.properties.remove(&PropertyKey::new(key))
     }
 
-    /// Returns the other endpoint of this edge given one endpoint.
+    /// Given one endpoint, returns the other end of this edge.
     ///
-    /// Returns `None` if `node` is neither the source nor destination.
+    /// Handy in traversals when you have a node and edge but need the neighbor.
+    /// Returns `None` if `node` isn't connected to this edge.
     #[must_use]
     pub fn other_endpoint(&self, node: NodeId) -> Option<NodeId> {
         if node == self.src {
@@ -65,9 +86,10 @@ impl Edge {
     }
 }
 
-/// The compact representation of an edge.
+/// The compact storage format for an edge - fits in one cache line.
 ///
-/// This struct is used for edge storage with minimal overhead.
+/// Like [`NodeRecord`](super::NodeRecord), this is what the store keeps in memory.
+/// Properties are stored separately in columnar format.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct EdgeRecord {
@@ -126,7 +148,7 @@ impl EdgeRecord {
     }
 }
 
-/// Flags for an edge record.
+/// Bit flags packed into an edge record.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EdgeFlags(pub u16);

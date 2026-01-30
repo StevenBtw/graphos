@@ -97,8 +97,16 @@ pub enum TokenKind {
     Unwind,
     /// MERGE keyword.
     Merge,
+    /// HAVING keyword (for filtering aggregate results).
+    Having,
     /// ON keyword (for MERGE ON CREATE/MATCH).
     On,
+    /// STARTS keyword (for STARTS WITH).
+    Starts,
+    /// ENDS keyword (for ENDS WITH).
+    Ends,
+    /// CONTAINS keyword.
+    Contains,
 
     // Literals
     /// Integer literal.
@@ -514,7 +522,11 @@ impl<'a> Lexer<'a> {
             "WITH" => TokenKind::With,
             "UNWIND" => TokenKind::Unwind,
             "MERGE" => TokenKind::Merge,
+            "HAVING" => TokenKind::Having,
             "ON" => TokenKind::On,
+            "STARTS" => TokenKind::Starts,
+            "ENDS" => TokenKind::Ends,
+            "CONTAINS" => TokenKind::Contains,
             _ => TokenKind::Identifier,
         }
     }

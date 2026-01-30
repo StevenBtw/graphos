@@ -219,7 +219,7 @@ grafeo-engine = { version = "0.1", features = ["gql", "sparql"] }
     ```python
     import grafeo
 
-    db = grafeo.Database()
+    db = grafeo.GrafeoDB()
 
     # SPARQL query
     result = db.sparql("""
@@ -234,7 +234,7 @@ grafeo-engine = { version = "0.1", features = ["gql", "sparql"] }
     ```python
     import grafeo
 
-    db = grafeo.Database()
+    db = grafeo.GrafeoDB()
 
     # GQL query
     result = db.query("""

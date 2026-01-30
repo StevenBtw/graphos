@@ -1,8 +1,14 @@
-//! Error types for Grafeo.
+//! Error types for Grafeo operations.
+//!
+//! [`Error`] is the main error type you'll encounter. For query-specific errors,
+//! [`QueryError`] includes source location and hints to help users fix issues.
 
 use std::fmt;
 
-/// The main error type for Grafeo operations.
+/// The main error type - covers everything that can go wrong in Grafeo.
+///
+/// Most methods return `Result<T, Error>`. Use pattern matching to handle
+/// specific cases, or just propagate with `?`.
 #[derive(Debug)]
 pub enum Error {
     /// A node was not found.
@@ -169,18 +175,22 @@ impl From<StorageError> for Error {
     }
 }
 
-/// Query-specific errors.
+/// A query error with source location and helpful hints.
+///
+/// When something goes wrong in a query (syntax error, unknown label, type
+/// mismatch), you get one of these. The error message includes the location
+/// in your query and often a suggestion for fixing it.
 #[derive(Debug, Clone)]
 pub struct QueryError {
-    /// The kind of query error.
+    /// What category of error (lexer, syntax, semantic, etc.)
     pub kind: QueryErrorKind,
-    /// Human-readable error message.
+    /// Human-readable explanation of what went wrong.
     pub message: String,
-    /// Source span in the original query (if applicable).
+    /// Where in the query the error occurred.
     pub span: Option<SourceSpan>,
-    /// The original query text.
+    /// The original query text (for showing context).
     pub source_query: Option<String>,
-    /// A hint for fixing the error.
+    /// A suggestion for fixing the error.
     pub hint: Option<String>,
 }
 

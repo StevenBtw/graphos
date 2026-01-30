@@ -1,10 +1,11 @@
-//! Semantic binding and type checking.
+//! Semantic validation - catching errors before execution.
 //!
-//! The binder resolves names, checks types, and produces a bound plan.
-//! It validates that:
-//! - All referenced variables are defined in scope
-//! - Property accesses are on valid variables
-//! - Types are compatible in expressions
+//! The binder walks the logical plan and validates that everything makes sense:
+//! - Is that variable actually defined? (You can't use `RETURN x` if `x` wasn't matched)
+//! - Does that property access make sense? (Accessing `.age` on an integer fails)
+//! - Are types compatible? (Can't compare a string to an integer)
+//!
+//! Better to catch these errors early than waste time executing a broken query.
 
 use crate::query::plan::{
     ExpandOp, FilterOp, LogicalExpression, LogicalOperator, LogicalPlan, NodeScanOp, ReturnItem,
@@ -396,8 +397,43 @@ impl Binder {
                         is_edge: false,
                     },
                 );
+                // Also add the path length variable for length(p) calls
+                let path_length_var = format!("_path_length_{}", sp.path_alias);
+                self.context.add_variable(
+                    path_length_var.clone(),
+                    VariableInfo {
+                        name: path_length_var,
+                        data_type: LogicalType::Int64,
+                        is_node: false,
+                        is_edge: false,
+                    },
+                );
                 Ok(())
             }
+            // SPARQL Update operators - these don't require variable binding
+            LogicalOperator::InsertTriple(insert) => {
+                if let Some(ref input) = insert.input {
+                    self.bind_operator(input)?;
+                }
+                Ok(())
+            }
+            LogicalOperator::DeleteTriple(delete) => {
+                if let Some(ref input) = delete.input {
+                    self.bind_operator(input)?;
+                }
+                Ok(())
+            }
+            LogicalOperator::Modify(modify) => {
+                self.bind_operator(&modify.where_clause)?;
+                Ok(())
+            }
+            LogicalOperator::ClearGraph(_)
+            | LogicalOperator::CreateGraph(_)
+            | LogicalOperator::DropGraph(_)
+            | LogicalOperator::LoadGraph(_)
+            | LogicalOperator::CopyGraph(_)
+            | LogicalOperator::MoveGraph(_)
+            | LogicalOperator::AddGraph(_) => Ok(()),
         }
     }
 
@@ -537,6 +573,20 @@ impl Binder {
                 is_edge: false,
             },
         );
+
+        // Add path length variable for variable-length paths (for length(p) calls)
+        if let Some(ref path_alias) = expand.path_alias {
+            let path_length_var = format!("_path_length_{}", path_alias);
+            self.context.add_variable(
+                path_length_var.clone(),
+                VariableInfo {
+                    name: path_length_var,
+                    data_type: LogicalType::Int64,
+                    is_node: false,
+                    is_edge: false,
+                },
+            );
+        }
 
         Ok(())
     }
@@ -920,6 +970,7 @@ mod tests {
                     label: Some("Person".to_string()),
                     input: None,
                 })),
+                path_alias: None,
             })),
         }));
 

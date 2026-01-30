@@ -26,7 +26,7 @@ We'll build a knowledge graph about movies, actors, directors, and genres.
 ```python
 import grafeo
 
-db = grafeo.Database()
+db = grafeo.GrafeoDB()
 ```
 
 ## Create the Knowledge Graph

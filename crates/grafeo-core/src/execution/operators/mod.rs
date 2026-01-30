@@ -1,17 +1,23 @@
-//! Physical operators for query execution.
+//! Physical operators that actually execute queries.
 //!
-//! This module provides the physical operators that form the execution tree:
+//! These are the building blocks of query execution. The optimizer picks which
+//! operators to use and how to wire them together.
 //!
-//! - Scan: Read nodes/edges from storage
-//! - Expand: Traverse edges from nodes
-//! - Filter: Apply predicates to filter rows
-//! - Project: Select and transform columns
-//! - Join: Hash join and nested loop join
-//! - Aggregate: Group by and aggregation functions
-//! - Sort: Order results by columns
-//! - Limit: Limit the number of results
+//! **Graph operators:**
+//! - [`ScanOperator`] - Read nodes/edges from storage
+//! - [`ExpandOperator`] - Traverse edges (the core of graph queries)
+//! - [`VariableLengthExpandOperator`] - Paths of variable length
+//! - [`ShortestPathOperator`] - Find shortest paths
 //!
-//! The `push` submodule contains push-based operator implementations.
+//! **Relational operators:**
+//! - [`FilterOperator`] - Apply predicates
+//! - [`ProjectOperator`] - Select/transform columns
+//! - [`HashJoinOperator`] - Efficient equi-joins
+//! - [`HashAggregateOperator`] - Group by with aggregation
+//! - [`SortOperator`] - Order results
+//! - [`LimitOperator`] - SKIP and LIMIT
+//!
+//! The [`push`] submodule has push-based variants for pipeline execution.
 
 mod aggregate;
 mod distinct;
@@ -87,14 +93,17 @@ pub enum OperatorError {
     Execution(String),
 }
 
-/// Trait for physical operators.
+/// The core trait for pull-based operators.
+///
+/// Call [`next()`](Self::next) repeatedly until it returns `None`. Each call
+/// returns a batch of rows (a DataChunk) or an error.
 pub trait Operator: Send + Sync {
-    /// Returns the next chunk of data, or None if exhausted.
+    /// Pulls the next batch of data. Returns `None` when exhausted.
     fn next(&mut self) -> OperatorResult;
 
-    /// Resets the operator to its initial state.
+    /// Resets to initial state so you can iterate again.
     fn reset(&mut self);
 
-    /// Returns the name of this operator for debugging.
+    /// Returns a name for debugging/explain output.
     fn name(&self) -> &'static str;
 }

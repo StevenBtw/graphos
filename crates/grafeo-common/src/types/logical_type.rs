@@ -1,17 +1,15 @@
-//! Logical type system for Grafeo.
+//! The type system for schemas and query type checking.
 //!
-//! This module defines the type system used for schema definitions and
-//! type checking in queries.
+//! [`LogicalType`] describes the types that can appear in schemas and query
+//! results. Used by the query optimizer for type inference and coercion.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Logical type for values in Grafeo.
+/// Describes the type of a value or column.
 ///
-/// These types correspond to the GQL/Cypher type system and are used for:
-/// - Schema definitions (column types in node/edge tables)
-/// - Query type checking
-/// - Value coercion rules
+/// Follows the GQL type system. Used for schema definitions and query type
+/// checking. Supports coercion rules (e.g., Int32 can coerce to Int64).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LogicalType {
     /// Unknown or any type (used during type inference)

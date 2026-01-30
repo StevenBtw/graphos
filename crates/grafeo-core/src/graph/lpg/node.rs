@@ -1,13 +1,31 @@
 //! Node types for the LPG model.
+//!
+//! Two representations here: [`Node`] is the friendly one with all the data,
+//! [`NodeRecord`] is the compact 32-byte struct for storage.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use grafeo_common::types::{EpochId, NodeId, PropertyKey, Value};
 
-/// A node in the labeled property graph.
+/// A node with its labels and properties fully loaded.
 ///
-/// This is the high-level representation of a node with all its data.
+/// This is what you get back from [`LpgStore::get_node()`](super::LpgStore::get_node).
+/// For bulk operations, the store works with [`NodeRecord`] internally.
+///
+/// # Example
+///
+/// ```
+/// use grafeo_core::graph::lpg::Node;
+/// use grafeo_common::types::NodeId;
+///
+/// let mut person = Node::new(NodeId::new(1));
+/// person.add_label("Person");
+/// person.set_property("name", "Alice");
+/// person.set_property("age", 30i64);
+///
+/// assert!(person.has_label("Person"));
+/// ```
 #[derive(Debug, Clone)]
 pub struct Node {
     /// Unique identifier.
@@ -80,10 +98,12 @@ impl Node {
     }
 }
 
-/// The compact, cache-line friendly representation of a node.
+/// The compact storage format for a node - exactly 32 bytes.
 ///
-/// This struct is exactly 32 bytes and is used for the primary node storage.
-/// Properties and labels are stored separately for flexibility.
+/// You won't interact with this directly most of the time. It's what lives
+/// in memory for each node, with properties and labels stored separately.
+/// The 32-byte size means two records fit in a cache line.
+///
 /// Fields are ordered to minimize padding: u64s first, then u32, then u16s.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -154,7 +174,9 @@ impl NodeRecord {
     }
 }
 
-/// Flags for a node record.
+/// Bit flags packed into a node record.
+///
+/// Check flags with [`contains()`](Self::contains), set with [`set()`](Self::set).
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NodeFlags(pub u16);

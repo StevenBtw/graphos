@@ -1,4 +1,8 @@
-//! Property value types for graph elements.
+//! Property values and keys for nodes and edges.
+//!
+//! [`Value`] is the dynamic type that can hold any property value - strings,
+//! numbers, lists, maps, etc. [`PropertyKey`] is an interned string for
+//! efficient property lookups.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -7,10 +11,10 @@ use std::sync::Arc;
 
 use super::Timestamp;
 
-/// A property key (interned string identifier).
+/// An interned property name - cheap to clone and compare.
 ///
-/// Property keys are commonly used strings that benefit from interning.
-/// This uses an `Arc<str>` for cheap cloning and comparison.
+/// Property names like "name", "age", "created_at" get used repeatedly, so
+/// we intern them with `Arc<str>`. You can create these from strings directly.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct PropertyKey(Arc<str>);
 
@@ -60,8 +64,23 @@ impl AsRef<str> for PropertyKey {
 
 /// A dynamically-typed property value.
 ///
-/// This enum represents all possible value types that can be stored as
-/// properties on nodes and edges. It supports the GQL type system.
+/// Nodes and edges can have properties of various types - this enum holds
+/// them all. Follows the GQL type system, so you can store nulls, booleans,
+/// numbers, strings, timestamps, lists, and maps.
+///
+/// # Examples
+///
+/// ```
+/// use grafeo_common::types::Value;
+///
+/// let name = Value::from("Alice");
+/// let age = Value::from(30i64);
+/// let active = Value::from(true);
+///
+/// // Check types
+/// assert!(name.as_str().is_some());
+/// assert_eq!(age.as_int64(), Some(30));
+/// ```
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     /// Null/missing value

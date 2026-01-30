@@ -28,6 +28,8 @@ pub struct ShortestPathOperator {
     edge_type: Option<String>,
     /// Direction of edge traversal.
     direction: Direction,
+    /// Whether to find all shortest paths (vs. just one).
+    all_paths: bool,
     /// Whether the operator has been exhausted.
     exhausted: bool,
 }
@@ -49,8 +51,15 @@ impl ShortestPathOperator {
             target_column,
             edge_type,
             direction,
+            all_paths: false,
             exhausted: false,
         }
+    }
+
+    /// Sets whether to find all shortest paths.
+    pub fn with_all_paths(mut self, all_paths: bool) -> Self {
+        self.all_paths = all_paths;
+        self
     }
 
     /// Finds the shortest path between source and target using BFS.
@@ -83,6 +92,75 @@ impl ShortestPathOperator {
         }
 
         None // No path found
+    }
+
+    /// Finds all shortest paths between source and target using BFS.
+    /// Returns a vector of path lengths (all will be the same minimum length).
+    /// For allShortestPaths, we return the count of paths with minimum length.
+    fn find_all_shortest_paths(&self, source: NodeId, target: NodeId) -> Vec<i64> {
+        if source == target {
+            return vec![0];
+        }
+
+        // BFS that tracks number of paths to each node at each depth
+        let mut distances: HashMap<NodeId, i64> = HashMap::new();
+        let mut path_counts: HashMap<NodeId, usize> = HashMap::new();
+        let mut queue: VecDeque<NodeId> = VecDeque::new();
+
+        distances.insert(source, 0);
+        path_counts.insert(source, 1);
+        queue.push_back(source);
+
+        let mut target_depth: Option<i64> = None;
+        let mut target_path_count = 0;
+
+        while let Some(current) = queue.pop_front() {
+            let current_depth = *distances.get(&current).unwrap();
+            let current_paths = *path_counts.get(&current).unwrap();
+
+            // If we've found target and we're past its depth, stop
+            if let Some(td) = target_depth {
+                if current_depth >= td {
+                    continue;
+                }
+            }
+
+            for neighbor in self.get_neighbors(current) {
+                let new_depth = current_depth + 1;
+
+                if neighbor == target {
+                    // Found target
+                    if target_depth.is_none() {
+                        target_depth = Some(new_depth);
+                        target_path_count = current_paths;
+                    } else if Some(new_depth) == target_depth {
+                        target_path_count += current_paths;
+                    }
+                    continue;
+                }
+
+                // If not visited or same depth (for counting all paths)
+                if let Some(&existing_depth) = distances.get(&neighbor) {
+                    if existing_depth == new_depth {
+                        // Same depth, add to path count
+                        *path_counts.get_mut(&neighbor).unwrap() += current_paths;
+                    }
+                    // If existing_depth < new_depth, skip (already processed at shorter distance)
+                } else {
+                    // New node
+                    distances.insert(neighbor, new_depth);
+                    path_counts.insert(neighbor, current_paths);
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+
+        // Return one entry per path
+        if let Some(depth) = target_depth {
+            vec![depth; target_path_count]
+        } else {
+            vec![]
+        }
     }
 
     /// Gets neighbors of a node respecting edge type filter and direction.
@@ -133,7 +211,13 @@ impl Operator for ShortestPathOperator {
             .collect();
         output_schema.push(LogicalType::Any); // Path column (stores length as int)
 
-        let mut builder = DataChunkBuilder::with_capacity(&output_schema, input_chunk.row_count());
+        // For allShortestPaths, we may need more rows than input
+        let initial_capacity = if self.all_paths {
+            input_chunk.row_count() * 4 // Estimate 4x for multiple paths
+        } else {
+            input_chunk.row_count()
+        };
+        let mut builder = DataChunkBuilder::with_capacity(&output_schema, initial_capacity);
 
         for row in input_chunk.selected_indices() {
             // Get source and target nodes
@@ -144,38 +228,52 @@ impl Operator for ShortestPathOperator {
                 .column(self.target_column)
                 .and_then(|c| c.get_node_id(row));
 
-            // Compute shortest path
-            let path_length = match (source, target) {
-                (Some(s), Some(t)) => self.find_shortest_path(s, t),
-                _ => None,
+            // Compute shortest path(s)
+            let path_lengths: Vec<Option<i64>> = match (source, target) {
+                (Some(s), Some(t)) => {
+                    if self.all_paths {
+                        let paths = self.find_all_shortest_paths(s, t);
+                        if paths.is_empty() {
+                            vec![None] // No path found, still output one row with null
+                        } else {
+                            paths.into_iter().map(Some).collect()
+                        }
+                    } else {
+                        vec![self.find_shortest_path(s, t)]
+                    }
+                }
+                _ => vec![None],
             };
 
-            // Copy input columns
-            for col_idx in 0..num_input_cols {
-                if let Some(in_col) = input_chunk.column(col_idx) {
-                    if let Some(out_col) = builder.column_mut(col_idx) {
-                        if let Some(node_id) = in_col.get_node_id(row) {
-                            out_col.push_node_id(node_id);
-                        } else if let Some(edge_id) = in_col.get_edge_id(row) {
-                            out_col.push_edge_id(edge_id);
-                        } else if let Some(value) = in_col.get_value(row) {
-                            out_col.push_value(value);
-                        } else {
-                            out_col.push_value(Value::Null);
+            // Output one row per path
+            for path_length in path_lengths {
+                // Copy input columns
+                for col_idx in 0..num_input_cols {
+                    if let Some(in_col) = input_chunk.column(col_idx) {
+                        if let Some(out_col) = builder.column_mut(col_idx) {
+                            if let Some(node_id) = in_col.get_node_id(row) {
+                                out_col.push_node_id(node_id);
+                            } else if let Some(edge_id) = in_col.get_edge_id(row) {
+                                out_col.push_edge_id(edge_id);
+                            } else if let Some(value) = in_col.get_value(row) {
+                                out_col.push_value(value);
+                            } else {
+                                out_col.push_value(Value::Null);
+                            }
                         }
                     }
                 }
-            }
 
-            // Add path length column
-            if let Some(out_col) = builder.column_mut(num_input_cols) {
-                match path_length {
-                    Some(len) => out_col.push_value(Value::Int64(len)),
-                    None => out_col.push_value(Value::Null),
+                // Add path length column
+                if let Some(out_col) = builder.column_mut(num_input_cols) {
+                    match path_length {
+                        Some(len) => out_col.push_value(Value::Int64(len)),
+                        None => out_col.push_value(Value::Null),
+                    }
                 }
-            }
 
-            builder.advance_row();
+                builder.advance_row();
+            }
         }
 
         let chunk = builder.finish();

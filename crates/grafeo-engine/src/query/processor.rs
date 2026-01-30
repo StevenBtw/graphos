@@ -550,6 +550,27 @@ fn substitute_in_operator(op: &mut LogicalOperator, params: &QueryParams) -> Res
         LogicalOperator::ShortestPath(sp) => {
             substitute_in_operator(&mut sp.input, params)?;
         }
+        // SPARQL Update operators
+        LogicalOperator::InsertTriple(insert) => {
+            if let Some(ref mut input) = insert.input {
+                substitute_in_operator(input, params)?;
+            }
+        }
+        LogicalOperator::DeleteTriple(delete) => {
+            if let Some(ref mut input) = delete.input {
+                substitute_in_operator(input, params)?;
+            }
+        }
+        LogicalOperator::Modify(modify) => {
+            substitute_in_operator(&mut modify.where_clause, params)?;
+        }
+        LogicalOperator::ClearGraph(_)
+        | LogicalOperator::CreateGraph(_)
+        | LogicalOperator::DropGraph(_)
+        | LogicalOperator::LoadGraph(_)
+        | LogicalOperator::CopyGraph(_)
+        | LogicalOperator::MoveGraph(_)
+        | LogicalOperator::AddGraph(_) => {}
         LogicalOperator::Empty => {}
     }
     Ok(())

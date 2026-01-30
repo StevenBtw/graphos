@@ -1,13 +1,30 @@
-//! Hash index for primary key lookups.
+//! Hash index for O(1) point lookups.
+//!
+//! Use this when you need to find entities by exact key - like looking up
+//! a user by their unique username or finding a node by a primary key.
 
 use grafeo_common::types::NodeId;
 use grafeo_common::utils::hash::FxHashMap;
 use parking_lot::RwLock;
 use std::hash::Hash;
 
-/// A concurrent hash index for fast key lookups.
+/// A thread-safe hash index for O(1) key lookups.
 ///
-/// This index provides O(1) average-case lookup, insertion, and deletion.
+/// Backed by FxHashMap with an RwLock - multiple readers, single writer.
+/// Best for exact-match queries on unique keys.
+///
+/// # Example
+///
+/// ```
+/// use grafeo_core::index::HashIndex;
+/// use grafeo_common::types::NodeId;
+///
+/// let index: HashIndex<String, NodeId> = HashIndex::new();
+/// index.insert("alice".to_string(), NodeId::new(1));
+/// index.insert("bob".to_string(), NodeId::new(2));
+///
+/// assert_eq!(index.get(&"alice".to_string()), Some(NodeId::new(1)));
+/// ```
 pub struct HashIndex<K: Hash + Eq, V: Copy> {
     /// The underlying hash map.
     map: RwLock<FxHashMap<K, V>>,

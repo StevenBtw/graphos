@@ -1,4 +1,13 @@
-//! LPG graph store implementation.
+//! The in-memory LPG graph store.
+//!
+//! This is where your nodes and edges actually live. Most users interact
+//! through [`GrafeoDB`](grafeo_engine::GrafeoDB), but algorithm implementers
+//! sometimes need the raw [`LpgStore`] for direct adjacency traversal.
+//!
+//! Key features:
+//! - MVCC versioning - concurrent readers don't block each other
+//! - Columnar properties with zone maps for fast filtering
+//! - Forward and backward adjacency indexes
 
 use super::property::CompareOp;
 use super::{Edge, EdgeRecord, Node, NodeRecord, PropertyStorage};
@@ -14,13 +23,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Configuration for the LPG store.
+///
+/// The defaults work well for most cases. Tune `backward_edges` if you only
+/// traverse in one direction (saves memory), or adjust capacities if you know
+/// your graph size upfront (avoids reallocations).
 #[derive(Debug, Clone)]
 pub struct LpgStoreConfig {
-    /// Whether to maintain backward adjacency lists.
+    /// Maintain backward adjacency for incoming edge queries. Turn off if
+    /// you only traverse outgoing edges - saves ~50% adjacency memory.
     pub backward_edges: bool,
-    /// Initial capacity for nodes.
+    /// Initial capacity for nodes (avoids early reallocations).
     pub initial_node_capacity: usize,
-    /// Initial capacity for edges.
+    /// Initial capacity for edges (avoids early reallocations).
     pub initial_edge_capacity: usize,
 }
 
@@ -34,10 +48,33 @@ impl Default for LpgStoreConfig {
     }
 }
 
-/// The main LPG graph store.
+/// The core in-memory graph storage.
 ///
-/// This is the core storage for labeled property graphs, providing
-/// efficient node/edge storage and adjacency indexing.
+/// Everything lives here: nodes, edges, properties, adjacency indexes, and
+/// version chains for MVCC. Concurrent reads never block each other.
+///
+/// Most users should go through `GrafeoDB` (from the `grafeo_engine` crate) which
+/// adds transaction management and query execution. Use `LpgStore` directly
+/// when you need raw performance for algorithm implementations.
+///
+/// # Example
+///
+/// ```
+/// use grafeo_core::graph::lpg::LpgStore;
+/// use grafeo_core::graph::Direction;
+///
+/// let store = LpgStore::new();
+///
+/// // Create a small social network
+/// let alice = store.create_node(&["Person"]);
+/// let bob = store.create_node(&["Person"]);
+/// store.create_edge(alice, bob, "KNOWS");
+///
+/// // Traverse outgoing edges
+/// for neighbor in store.neighbors(alice, Direction::Outgoing) {
+///     println!("Alice knows node {:?}", neighbor);
+/// }
+/// ```
 pub struct LpgStore {
     /// Configuration.
     #[allow(dead_code)]
@@ -334,7 +371,10 @@ impl LpgStore {
         }
     }
 
-    /// Deletes all edges connected to a node (for DETACH DELETE).
+    /// Deletes all edges connected to a node (implements DETACH DELETE).
+    ///
+    /// Call this before `delete_node()` if you want to remove a node that
+    /// has edges. Grafeo doesn't auto-delete edges - you have to be explicit.
     pub fn delete_node_edges(&self, node_id: NodeId) {
         // Get outgoing edges
         let outgoing: Vec<EdgeId> = self
@@ -764,7 +804,10 @@ impl LpgStore {
 
     // === Traversal ===
 
-    /// Returns an iterator over neighbors of a node.
+    /// Iterates over neighbors of a node in the specified direction.
+    ///
+    /// This is the fast path for graph traversal - goes straight to the
+    /// adjacency index without loading full node data.
     pub fn neighbors(
         &self,
         node: NodeId,
@@ -831,7 +874,10 @@ impl LpgStore {
         id_to_type.get(record.type_id as usize).cloned()
     }
 
-    /// Returns nodes with a specific label.
+    /// Returns all nodes with a specific label.
+    ///
+    /// Uses the label index for O(1) lookup per label. Returns a snapshot -
+    /// concurrent modifications won't affect the returned vector.
     pub fn nodes_by_label(&self, label: &str) -> Vec<NodeId> {
         let label_to_id = self.label_to_id.read();
         if let Some(&label_id) = label_to_id.get(label) {
@@ -841,6 +887,114 @@ impl LpgStore {
             }
         }
         Vec::new()
+    }
+
+    // === Admin API: Iteration ===
+
+    /// Returns an iterator over all nodes in the database.
+    ///
+    /// This creates a snapshot of all visible nodes at the current epoch.
+    /// Useful for dump/export operations.
+    pub fn all_nodes(&self) -> impl Iterator<Item = Node> + '_ {
+        let epoch = self.current_epoch();
+        let node_ids: Vec<NodeId> = self
+            .nodes
+            .read()
+            .iter()
+            .filter_map(|(id, chain)| {
+                chain
+                    .visible_at(epoch)
+                    .and_then(|r| if !r.is_deleted() { Some(*id) } else { None })
+            })
+            .collect();
+
+        node_ids.into_iter().filter_map(move |id| self.get_node(id))
+    }
+
+    /// Returns an iterator over all edges in the database.
+    ///
+    /// This creates a snapshot of all visible edges at the current epoch.
+    /// Useful for dump/export operations.
+    pub fn all_edges(&self) -> impl Iterator<Item = Edge> + '_ {
+        let epoch = self.current_epoch();
+        let edge_ids: Vec<EdgeId> = self
+            .edges
+            .read()
+            .iter()
+            .filter_map(|(id, chain)| {
+                chain
+                    .visible_at(epoch)
+                    .and_then(|r| if !r.is_deleted() { Some(*id) } else { None })
+            })
+            .collect();
+
+        edge_ids.into_iter().filter_map(move |id| self.get_edge(id))
+    }
+
+    /// Returns all label names in the database.
+    pub fn all_labels(&self) -> Vec<String> {
+        self.id_to_label
+            .read()
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// Returns all edge type names in the database.
+    pub fn all_edge_types(&self) -> Vec<String> {
+        self.id_to_edge_type
+            .read()
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// Returns all property keys used in the database.
+    pub fn all_property_keys(&self) -> Vec<String> {
+        let mut keys = std::collections::HashSet::new();
+        for key in self.node_properties.keys() {
+            keys.insert(key.to_string());
+        }
+        for key in self.edge_properties.keys() {
+            keys.insert(key.to_string());
+        }
+        keys.into_iter().collect()
+    }
+
+    /// Returns an iterator over nodes with a specific label.
+    pub fn nodes_with_label<'a>(&'a self, label: &str) -> impl Iterator<Item = Node> + 'a {
+        let node_ids = self.nodes_by_label(label);
+        node_ids.into_iter().filter_map(move |id| self.get_node(id))
+    }
+
+    /// Returns an iterator over edges with a specific type.
+    pub fn edges_with_type<'a>(&'a self, edge_type: &str) -> impl Iterator<Item = Edge> + 'a {
+        let epoch = self.current_epoch();
+        let type_to_id = self.edge_type_to_id.read();
+
+        if let Some(&type_id) = type_to_id.get(edge_type) {
+            let edge_ids: Vec<EdgeId> = self
+                .edges
+                .read()
+                .iter()
+                .filter_map(|(id, chain)| {
+                    chain.visible_at(epoch).and_then(|r| {
+                        if !r.is_deleted() && r.type_id == type_id {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+
+            // Return a boxed iterator for the found edges
+            Box::new(edge_ids.into_iter().filter_map(move |id| self.get_edge(id)))
+                as Box<dyn Iterator<Item = Edge> + 'a>
+        } else {
+            // Return empty iterator
+            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = Edge> + 'a>
+        }
     }
 
     // === Zone Map Support ===
@@ -896,9 +1050,10 @@ impl LpgStore {
         self.statistics.read().clone()
     }
 
-    /// Updates statistics from current data.
+    /// Recomputes statistics from current data.
     ///
-    /// This scans all labels and edge types to compute cardinality statistics.
+    /// Scans all labels and edge types to build cardinality estimates for the
+    /// query optimizer. Call this periodically or after bulk data loads.
     pub fn compute_statistics(&self) {
         let mut stats = Statistics::new();
 
