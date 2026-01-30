@@ -25,7 +25,7 @@ serde = { workspace = true }
 serde_json = "1"
 
 # Progress bars
-indicatif = "0.17"
+indicatif = "0.18"
 
 # Error handling
 thiserror.workspace = true
