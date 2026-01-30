@@ -196,7 +196,7 @@ impl<'a> TrieIterator<'a> {
 ///
 /// Given multiple sorted iterators, finds their intersection by "leapfrogging"
 /// - each iterator jumps ahead to match the maximum of the others. This avoids
-/// the Cartesian product explosion of naive binary joins.
+///   the Cartesian product explosion of naive binary joins.
 pub struct LeapfrogJoin<'a> {
     iters: Vec<TrieIterator<'a>>,
     current_key: Option<NodeId>,

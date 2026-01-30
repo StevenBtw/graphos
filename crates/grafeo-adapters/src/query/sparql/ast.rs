@@ -174,9 +174,9 @@ pub struct QuadPattern {
 /// USING clause for updates.
 #[derive(Debug, Clone, PartialEq)]
 pub enum UsingClause {
-    /// USING <iri>.
+    /// `USING <iri>`.
     Default(Iri),
-    /// USING NAMED <iri>.
+    /// `USING NAMED <iri>`.
     Named(Iri),
 }
 

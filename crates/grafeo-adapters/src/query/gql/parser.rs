@@ -74,6 +74,9 @@ impl<'a> Parser<'a> {
                 | TokenKind::Unwind
                 | TokenKind::Merge
                 | TokenKind::On
+                | TokenKind::Starts
+                | TokenKind::Ends
+                | TokenKind::Contains
         )
     }
 
@@ -241,6 +244,13 @@ impl<'a> Parser<'a> {
             return Err(self.error("Expected RETURN"));
         };
 
+        // Parse optional HAVING clause (after RETURN, filters aggregate results)
+        let having_clause = if self.current.kind == TokenKind::Having {
+            Some(self.parse_having_clause()?)
+        } else {
+            None
+        };
+
         Ok(QueryStatement {
             match_clauses,
             where_clause,
@@ -251,6 +261,7 @@ impl<'a> Parser<'a> {
             create_clauses,
             delete_clauses,
             return_clause,
+            having_clause,
             span: Some(SourceSpan::new(span_start, self.current.span.end, 1, 1)),
         })
     }
@@ -829,6 +840,16 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_having_clause(&mut self) -> Result<HavingClause> {
+        self.expect(TokenKind::Having)?;
+        let expression = self.parse_expression()?;
+
+        Ok(HavingClause {
+            expression,
+            span: None,
+        })
+    }
+
     fn parse_return_clause(&mut self) -> Result<ReturnClause> {
         self.expect(TokenKind::Return)?;
 
@@ -971,6 +992,7 @@ impl<'a> Parser<'a> {
     fn parse_comparison_expression(&mut self) -> Result<Expression> {
         let left = self.parse_additive_expression()?;
 
+        // Check for regular comparison operators
         let op = match self.current.kind {
             TokenKind::Eq => Some(BinaryOp::Eq),
             TokenKind::Ne => Some(BinaryOp::Ne),
@@ -984,14 +1006,48 @@ impl<'a> Parser<'a> {
         if let Some(op) = op {
             self.advance();
             let right = self.parse_additive_expression()?;
-            Ok(Expression::Binary {
+            return Ok(Expression::Binary {
                 left: Box::new(left),
                 op,
                 right: Box::new(right),
-            })
-        } else {
-            Ok(left)
+            });
         }
+
+        // Check for STARTS WITH, ENDS WITH, CONTAINS
+        match self.current.kind {
+            TokenKind::Starts => {
+                self.advance(); // consume STARTS
+                self.expect(TokenKind::With)?; // expect WITH
+                let right = self.parse_additive_expression()?;
+                return Ok(Expression::Binary {
+                    left: Box::new(left),
+                    op: BinaryOp::StartsWith,
+                    right: Box::new(right),
+                });
+            }
+            TokenKind::Ends => {
+                self.advance(); // consume ENDS
+                self.expect(TokenKind::With)?; // expect WITH
+                let right = self.parse_additive_expression()?;
+                return Ok(Expression::Binary {
+                    left: Box::new(left),
+                    op: BinaryOp::EndsWith,
+                    right: Box::new(right),
+                });
+            }
+            TokenKind::Contains => {
+                self.advance(); // consume CONTAINS
+                let right = self.parse_additive_expression()?;
+                return Ok(Expression::Binary {
+                    left: Box::new(left),
+                    op: BinaryOp::Contains,
+                    right: Box::new(right),
+                });
+            }
+            _ => {}
+        }
+
+        Ok(left)
     }
 
     fn parse_additive_expression(&mut self) -> Result<Expression> {
@@ -1312,6 +1368,7 @@ impl<'a> Parser<'a> {
                 limit: None,
                 span: None,
             },
+            having_clause: None,
             span: None,
         })
     }

@@ -53,7 +53,7 @@ impl Default for LpgStoreConfig {
 /// Everything lives here: nodes, edges, properties, adjacency indexes, and
 /// version chains for MVCC. Concurrent reads never block each other.
 ///
-/// Most users should go through [`GrafeoDB`](grafeo_engine::GrafeoDB) which
+/// Most users should go through `GrafeoDB` (from the `grafeo_engine` crate) which
 /// adds transaction management and query execution. Use `LpgStore` directly
 /// when you need raw performance for algorithm implementations.
 ///
@@ -887,6 +887,114 @@ impl LpgStore {
             }
         }
         Vec::new()
+    }
+
+    // === Admin API: Iteration ===
+
+    /// Returns an iterator over all nodes in the database.
+    ///
+    /// This creates a snapshot of all visible nodes at the current epoch.
+    /// Useful for dump/export operations.
+    pub fn all_nodes(&self) -> impl Iterator<Item = Node> + '_ {
+        let epoch = self.current_epoch();
+        let node_ids: Vec<NodeId> = self
+            .nodes
+            .read()
+            .iter()
+            .filter_map(|(id, chain)| {
+                chain
+                    .visible_at(epoch)
+                    .and_then(|r| if !r.is_deleted() { Some(*id) } else { None })
+            })
+            .collect();
+
+        node_ids.into_iter().filter_map(move |id| self.get_node(id))
+    }
+
+    /// Returns an iterator over all edges in the database.
+    ///
+    /// This creates a snapshot of all visible edges at the current epoch.
+    /// Useful for dump/export operations.
+    pub fn all_edges(&self) -> impl Iterator<Item = Edge> + '_ {
+        let epoch = self.current_epoch();
+        let edge_ids: Vec<EdgeId> = self
+            .edges
+            .read()
+            .iter()
+            .filter_map(|(id, chain)| {
+                chain
+                    .visible_at(epoch)
+                    .and_then(|r| if !r.is_deleted() { Some(*id) } else { None })
+            })
+            .collect();
+
+        edge_ids.into_iter().filter_map(move |id| self.get_edge(id))
+    }
+
+    /// Returns all label names in the database.
+    pub fn all_labels(&self) -> Vec<String> {
+        self.id_to_label
+            .read()
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// Returns all edge type names in the database.
+    pub fn all_edge_types(&self) -> Vec<String> {
+        self.id_to_edge_type
+            .read()
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// Returns all property keys used in the database.
+    pub fn all_property_keys(&self) -> Vec<String> {
+        let mut keys = std::collections::HashSet::new();
+        for key in self.node_properties.keys() {
+            keys.insert(key.to_string());
+        }
+        for key in self.edge_properties.keys() {
+            keys.insert(key.to_string());
+        }
+        keys.into_iter().collect()
+    }
+
+    /// Returns an iterator over nodes with a specific label.
+    pub fn nodes_with_label<'a>(&'a self, label: &str) -> impl Iterator<Item = Node> + 'a {
+        let node_ids = self.nodes_by_label(label);
+        node_ids.into_iter().filter_map(move |id| self.get_node(id))
+    }
+
+    /// Returns an iterator over edges with a specific type.
+    pub fn edges_with_type<'a>(&'a self, edge_type: &str) -> impl Iterator<Item = Edge> + 'a {
+        let epoch = self.current_epoch();
+        let type_to_id = self.edge_type_to_id.read();
+
+        if let Some(&type_id) = type_to_id.get(edge_type) {
+            let edge_ids: Vec<EdgeId> = self
+                .edges
+                .read()
+                .iter()
+                .filter_map(|(id, chain)| {
+                    chain.visible_at(epoch).and_then(|r| {
+                        if !r.is_deleted() && r.type_id == type_id {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+
+            // Return a boxed iterator for the found edges
+            Box::new(edge_ids.into_iter().filter_map(move |id| self.get_edge(id)))
+                as Box<dyn Iterator<Item = Edge> + 'a>
+        } else {
+            // Return empty iterator
+            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = Edge> + 'a>
+        }
     }
 
     // === Zone Map Support ===

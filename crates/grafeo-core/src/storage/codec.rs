@@ -18,6 +18,7 @@ use std::io;
 
 use super::bitpack::{BitPackedInts, DeltaBitPacked};
 use super::bitvec::BitVector;
+use super::runlength::{RunLengthAnalyzer, RunLengthEncoding};
 
 /// Identifies which compression algorithm was used on a chunk of data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -160,6 +161,12 @@ pub struct CodecSelector;
 
 impl CodecSelector {
     /// Selects the best codec for a slice of u64 values.
+    ///
+    /// Considers multiple codecs and picks the one with the best estimated
+    /// compression ratio:
+    /// - RunLength: Best for highly repetitive data (avg run length > 2)
+    /// - DeltaBitPacked: Best for sorted/sequential integers
+    /// - BitPacked: Best for small integers with limited range
     #[must_use]
     pub fn select_for_integers(values: &[u64]) -> CompressionCodec {
         if values.is_empty() {
@@ -171,6 +178,15 @@ impl CodecSelector {
             return CompressionCodec::None;
         }
 
+        // Check run-length encoding first (best for repetitive data)
+        let rle_ratio = RunLengthAnalyzer::estimate_ratio(values);
+        let avg_run_length = RunLengthAnalyzer::average_run_length(values);
+
+        // RLE is beneficial if avg run length > 2 (breaks even at 2)
+        if avg_run_length > 2.0 && rle_ratio > 1.5 {
+            return CompressionCodec::RunLength;
+        }
+
         // Check if sorted (ascending)
         let is_sorted = values.windows(2).all(|w| w[0] <= w[1]);
 
@@ -180,12 +196,32 @@ impl CodecSelector {
             let max_delta = deltas.iter().copied().max().unwrap_or(0);
             let bits_needed = BitPackedInts::bits_needed(max_delta);
 
+            // Estimate DeltaBitPacked ratio
+            let delta_ratio = 64.0 / bits_needed as f64;
+
+            // If RLE is still better, prefer it
+            if rle_ratio > delta_ratio && rle_ratio > 1.0 {
+                return CompressionCodec::RunLength;
+            }
+
             return CompressionCodec::DeltaBitPacked { bits: bits_needed };
         }
 
         // Not sorted - try simple bit-packing
         let max_value = values.iter().copied().max().unwrap_or(0);
         let bits_needed = BitPackedInts::bits_needed(max_value);
+
+        // Estimate BitPacked ratio
+        let bitpack_ratio = if bits_needed > 0 {
+            64.0 / bits_needed as f64
+        } else {
+            1.0
+        };
+
+        // If RLE is better, prefer it
+        if rle_ratio > bitpack_ratio && rle_ratio > 1.0 {
+            return CompressionCodec::RunLength;
+        }
 
         if bits_needed < 32 {
             CompressionCodec::BitPacked { bits: bits_needed }
@@ -268,6 +304,17 @@ impl TypeSpecificCompressor {
                     },
                 }
             }
+            CompressionCodec::RunLength => {
+                let encoded = RunLengthEncoding::encode(values);
+                CompressedData {
+                    codec: CompressionCodec::RunLength,
+                    uncompressed_size: values.len() * 8,
+                    data: encoded.to_bytes(),
+                    metadata: CompressionMetadata::RunLength {
+                        run_count: encoded.run_count(),
+                    },
+                }
+            }
             _ => unreachable!("Unexpected codec for integers"),
         }
     }
@@ -312,6 +359,10 @@ impl TypeSpecificCompressor {
             CompressionCodec::BitPacked { .. } => {
                 let packed = BitPackedInts::from_bytes(&data.data)?;
                 Ok(packed.unpack())
+            }
+            CompressionCodec::RunLength => {
+                let encoded = RunLengthEncoding::from_bytes(&data.data)?;
+                Ok(encoded.decode())
             }
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -428,5 +479,66 @@ mod tests {
         assert_eq!(CompressionCodec::Dictionary.name(), "Dictionary");
         assert_eq!(CompressionCodec::BitVector.name(), "BitVector");
         assert_eq!(CompressionCodec::RunLength.name(), "RunLength");
+    }
+
+    #[test]
+    fn test_codec_selection_repetitive_integers() {
+        // Highly repetitive data should select RunLength
+        let repetitive: Vec<u64> = vec![1; 100];
+        let codec = CodecSelector::select_for_integers(&repetitive);
+        assert_eq!(codec, CompressionCodec::RunLength);
+
+        // Mix of repeated values
+        let mut mixed = vec![1u64; 30];
+        mixed.extend(vec![2u64; 30]);
+        mixed.extend(vec![3u64; 30]);
+        let codec = CodecSelector::select_for_integers(&mixed);
+        assert_eq!(codec, CompressionCodec::RunLength);
+    }
+
+    #[test]
+    fn test_compress_decompress_runlength() {
+        // Highly repetitive data
+        let values: Vec<u64> = vec![42; 1000];
+        let compressed = TypeSpecificCompressor::compress_integers(&values);
+
+        assert_eq!(compressed.codec, CompressionCodec::RunLength);
+        assert!(
+            compressed.compression_ratio() > 50.0,
+            "Expected ratio > 50, got {}",
+            compressed.compression_ratio()
+        );
+
+        let decompressed = TypeSpecificCompressor::decompress_integers(&compressed).unwrap();
+        assert_eq!(values, decompressed);
+    }
+
+    #[test]
+    fn test_compress_decompress_mixed_runs() {
+        // Multiple runs
+        let mut values = vec![1u64; 100];
+        values.extend(vec![2u64; 100]);
+        values.extend(vec![3u64; 100]);
+
+        let compressed = TypeSpecificCompressor::compress_integers(&values);
+
+        assert_eq!(compressed.codec, CompressionCodec::RunLength);
+        assert!(compressed.compression_ratio() > 10.0);
+
+        let decompressed = TypeSpecificCompressor::decompress_integers(&compressed).unwrap();
+        assert_eq!(values, decompressed);
+    }
+
+    #[test]
+    fn test_runlength_vs_delta_selection() {
+        // Sequential values should still prefer DeltaBitPacked over RunLength
+        let sequential: Vec<u64> = (0..100).collect();
+        let codec = CodecSelector::select_for_integers(&sequential);
+        assert!(matches!(codec, CompressionCodec::DeltaBitPacked { .. }));
+
+        // But constant values should prefer RunLength
+        let constant: Vec<u64> = vec![100; 100];
+        let codec = CodecSelector::select_for_integers(&constant);
+        assert_eq!(codec, CompressionCodec::RunLength);
     }
 }

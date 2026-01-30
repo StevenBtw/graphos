@@ -173,13 +173,13 @@ class TestQuerySyntaxEquivalence:
         """Directed queries should be subset of undirected."""
         # Directed: only outgoing edges
         result_directed = self.db.execute(
-            "MATCH (a:Node)-[:LINK]->(b:Node) RETURN count(*) AS cnt"
+            "MATCH (a:Node)-[:LINK]->(b:Node) RETURN count(a) AS cnt"
         )
         directed_count = list(result_directed)[0]["cnt"]
 
         # Undirected: both directions
         result_undirected = self.db.execute(
-            "MATCH (a:Node)-[:LINK]-(b:Node) RETURN count(*) AS cnt"
+            "MATCH (a:Node)-[:LINK]-(b:Node) RETURN count(a) AS cnt"
         )
         undirected_count = list(result_undirected)[0]["cnt"]
 

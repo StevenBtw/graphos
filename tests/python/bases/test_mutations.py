@@ -18,6 +18,18 @@ class BaseMutationsTest(ABC):
     """
 
     # =========================================================================
+    # EXECUTION
+    # =========================================================================
+
+    def execute_query(self, db, query):
+        """Execute a query using the appropriate language parser.
+
+        Override in subclasses that need a specific parser (e.g., Cypher).
+        Default uses GQL parser via db.execute().
+        """
+        return db.execute(query)
+
+    # =========================================================================
     # QUERY BUILDERS
     # =========================================================================
 
@@ -131,13 +143,13 @@ class BaseMutationsTest(ABC):
     def test_create_single_node(self, db):
         """Test creating a single node."""
         query = self.create_node_query(["Person"], {"name": "Alice", "age": 30})
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
         assert len(rows) >= 0  # INSERT may not return rows
 
         # Verify node exists
         match_query = self.match_node_query("Person")
-        result = db.execute(match_query)
+        result = self.execute_query(db, match_query)
         rows = list(result)
         assert len(rows) == 1
 
@@ -146,11 +158,11 @@ class BaseMutationsTest(ABC):
         query = self.create_node_query(
             ["Person", "Developer"], {"name": "Bob", "language": "Rust"}
         )
-        db.execute(query)
+        self.execute_query(db, query)
 
         # Verify node has both labels
         match_query = self.match_node_query("Person")
-        result = db.execute(match_query)
+        result = self.execute_query(db, match_query)
         rows = list(result)
         names = [r.get("n.name") or r.get("name") for r in rows]
         assert "Bob" in names
@@ -166,10 +178,10 @@ class BaseMutationsTest(ABC):
                 "bool_val": True,
             },
         )
-        db.execute(query)
+        self.execute_query(db, query)
 
         # Verify properties exist
-        result = db.execute("MATCH (n:Data) RETURN n.int_val")
+        result = self.execute_query(db,"MATCH (n:Data) RETURN n.int_val")
         rows = list(result)
         assert len(rows) == 1
         assert rows[0].get("n.int_val") == 42
@@ -178,19 +190,19 @@ class BaseMutationsTest(ABC):
         """Test creating multiple nodes."""
         for i in range(5):
             query = self.create_node_query(["Person"], {"name": f"Person{i}", "idx": i})
-            db.execute(query)
+            self.execute_query(db, query)
 
         # Verify all nodes created
         match_query = self.match_node_query("Person")
-        result = db.execute(match_query)
+        result = self.execute_query(db, match_query)
         rows = list(result)
         assert len(rows) == 5
 
     def test_create_edge(self, db):
         """Test creating an edge between nodes."""
         # Create two nodes
-        db.execute(self.create_node_query(["Person"], {"name": "Alice"}))
-        db.execute(self.create_node_query(["Person"], {"name": "Bob"}))
+        self.execute_query(db,self.create_node_query(["Person"], {"name": "Alice"}))
+        self.execute_query(db,self.create_node_query(["Person"], {"name": "Bob"}))
 
         # Create edge
         query = self.create_edge_query(
@@ -198,10 +210,10 @@ class BaseMutationsTest(ABC):
             "Person", "name", "Bob",
             "KNOWS", {"since": 2020}
         )
-        db.execute(query)
+        self.execute_query(db, query)
 
         # Verify edge exists
-        result = db.execute(
+        result = self.execute_query(db,
             "MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN a.name, b.name, r.since"
         )
         rows = list(result)
@@ -215,14 +227,14 @@ class BaseMutationsTest(ABC):
     def test_update_node_property(self, db):
         """Test updating a node property."""
         # Create node
-        db.execute(self.create_node_query(["Person"], {"name": "Alice", "age": 30}))
+        self.execute_query(db,self.create_node_query(["Person"], {"name": "Alice", "age": 30}))
 
         # Update age
         query = self.update_node_query("Person", "name", "Alice", "age", 31)
-        db.execute(query)
+        self.execute_query(db, query)
 
         # Verify update
-        result = db.execute("MATCH (n:Person {name: 'Alice'}) RETURN n.age")
+        result = self.execute_query(db,"MATCH (n:Person {name: 'Alice'}) RETURN n.age")
         rows = list(result)
         assert len(rows) == 1
         assert rows[0].get("n.age") == 31
@@ -234,16 +246,16 @@ class BaseMutationsTest(ABC):
     def test_delete_node(self, db):
         """Test deleting a node."""
         # Create nodes
-        db.execute(self.create_node_query(["Person"], {"name": "Alice"}))
-        db.execute(self.create_node_query(["Person"], {"name": "Bob"}))
+        self.execute_query(db,self.create_node_query(["Person"], {"name": "Alice"}))
+        self.execute_query(db,self.create_node_query(["Person"], {"name": "Bob"}))
 
         # Delete Alice
         query = self.delete_node_query("Person", "name", "Alice")
-        db.execute(query)
+        self.execute_query(db, query)
 
         # Verify only Bob remains
         match_query = self.match_node_query("Person")
-        result = db.execute(match_query)
+        result = self.execute_query(db, match_query)
         rows = list(result)
         names = [r.get("n.name") or r.get("name") for r in rows]
         assert len(rows) == 1
@@ -257,13 +269,13 @@ class BaseMutationsTest(ABC):
     def test_match_with_filter(self, db):
         """Test matching nodes with WHERE clause."""
         # Create test data
-        db.execute(self.create_node_query(["Person"], {"name": "Alice", "age": 30}))
-        db.execute(self.create_node_query(["Person"], {"name": "Bob", "age": 25}))
-        db.execute(self.create_node_query(["Person"], {"name": "Charlie", "age": 35}))
+        self.execute_query(db,self.create_node_query(["Person"], {"name": "Alice", "age": 30}))
+        self.execute_query(db,self.create_node_query(["Person"], {"name": "Bob", "age": 25}))
+        self.execute_query(db,self.create_node_query(["Person"], {"name": "Charlie", "age": 35}))
 
         # Query with filter
         query = self.match_where_query("Person", "age", ">", 28)
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         # Alice (30) and Charlie (35) should match

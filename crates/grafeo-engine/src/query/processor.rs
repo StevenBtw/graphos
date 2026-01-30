@@ -561,6 +561,9 @@ fn substitute_in_operator(op: &mut LogicalOperator, params: &QueryParams) -> Res
                 substitute_in_operator(input, params)?;
             }
         }
+        LogicalOperator::Modify(modify) => {
+            substitute_in_operator(&mut modify.where_clause, params)?;
+        }
         LogicalOperator::ClearGraph(_)
         | LogicalOperator::CreateGraph(_)
         | LogicalOperator::DropGraph(_)

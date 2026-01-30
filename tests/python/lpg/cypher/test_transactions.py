@@ -9,6 +9,10 @@ from tests.python.bases.test_transactions import BaseTransactionsTest
 class TestCypherTransactions(BaseTransactionsTest):
     """Cypher implementation of transaction tests."""
 
+    def execute_query(self, db, query):
+        """Execute query using Cypher parser."""
+        return db.execute_cypher(query)
+
     def insert_query(self, labels: list[str], props: dict) -> str:
         """Return Cypher CREATE query."""
         label_str = ":".join(labels)

@@ -25,7 +25,7 @@ We'll use the principle: "Users who bought X also bought Y" implemented as graph
 ```python
 import grafeo
 
-db = grafeo.Database()
+db = grafeo.GrafeoDB()
 ```
 
 ## Create the Data Model

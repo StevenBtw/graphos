@@ -12,10 +12,12 @@
 //! | [`pipeline`] | Push-based execution (data flows through operators) |
 //! | [`parallel`] | Morsel-driven parallelism |
 //! | [`spill`] | Disk spilling when memory is tight |
+//! | [`adaptive`] | Adaptive execution with runtime cardinality feedback |
 //!
 //! The execution model is push-based: sources push data through a pipeline of
 //! operators until it reaches a sink.
 
+pub mod adaptive;
 pub mod chunk;
 pub mod memory;
 pub mod operators;
@@ -27,6 +29,13 @@ pub mod source;
 pub mod spill;
 pub mod vector;
 
+pub use adaptive::{
+    AdaptiveCheckpoint, AdaptiveContext, AdaptiveEvent, AdaptiveExecutionConfig,
+    AdaptiveExecutionResult, AdaptivePipelineBuilder, AdaptivePipelineConfig,
+    AdaptivePipelineExecutor, AdaptiveSummary, CardinalityCheckpoint, CardinalityFeedback,
+    CardinalityTrackingOperator, CardinalityTrackingSink, CardinalityTrackingWrapper,
+    ReoptimizationDecision, SharedAdaptiveContext, evaluate_reoptimization, execute_adaptive,
+};
 pub use chunk::DataChunk;
 pub use memory::{ExecutionMemoryContext, ExecutionMemoryContextBuilder};
 pub use parallel::{

@@ -22,9 +22,9 @@ pub mod rdf;
 /// relationships *to* a node, and [`Both`](Self::Both) when direction doesn't matter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {
-    /// Follow outgoing edges (A)-[r]->(B) from A's perspective.
+    /// Follow outgoing edges (A)-\[r\]->(B) from A's perspective.
     Outgoing,
-    /// Follow incoming edges (A)<-[r]-(B) from A's perspective.
+    /// Follow incoming edges (A)<-\[r\]-(B) from A's perspective.
     Incoming,
     /// Follow edges in either direction - treat the graph as undirected.
     Both,

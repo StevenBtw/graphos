@@ -10,6 +10,10 @@ from tests.python.bases.test_queries import BaseQueriesTest
 class TestCypherQueries(BaseQueriesTest):
     """Cypher implementation of query tests."""
 
+    def execute_query(self, db, query):
+        """Execute query using Cypher parser."""
+        return db.execute_cypher(query)
+
     # =========================================================================
     # SETUP METHODS
     # =========================================================================
@@ -134,7 +138,7 @@ class TestCypherSpecificPatterns:
 
     def test_cypher_inline_properties(self, pattern_db):
         """Test Cypher inline property matching."""
-        result = pattern_db.execute("MATCH (p:Person {city: 'NYC'}) RETURN p.name")
+        result = pattern_db.execute_cypher("MATCH (p:Person {city: 'NYC'}) RETURN p.name")
         rows = list(result)
         names = [r["p.name"] for r in rows]
         assert "Alice" in names
@@ -143,7 +147,7 @@ class TestCypherSpecificPatterns:
 
     def test_cypher_with_clause(self, pattern_db):
         """Test Cypher WITH clause for query chaining."""
-        result = pattern_db.execute(
+        result = pattern_db.execute_cypher(
             "MATCH (p:Person) WITH p.name AS name, p.age AS age WHERE age > 25 RETURN name, age ORDER BY age"
         )
         rows = list(result)
@@ -151,14 +155,14 @@ class TestCypherSpecificPatterns:
 
     def test_cypher_unwind(self, db):
         """Test Cypher UNWIND list."""
-        result = db.execute("UNWIND [1, 2, 3] AS x RETURN x")
+        result = db.execute_cypher("UNWIND [1, 2, 3] AS x RETURN x")
         rows = list(result)
         assert len(rows) == 3
 
     def test_cypher_optional_match(self, pattern_db):
         """Test Cypher OPTIONAL MATCH."""
         pattern_db.create_node(["Person"], {"name": "Diana", "age": 40})
-        result = pattern_db.execute(
+        result = pattern_db.execute_cypher(
             "MATCH (p:Person) OPTIONAL MATCH (p)-[:WORKS_AT]->(c:Company) RETURN p.name, c.name"
         )
         rows = list(result)
@@ -174,7 +178,7 @@ class TestCypherSpecificAggregations:
         db.create_node(["Person"], {"name": "Bob"})
         db.create_node(["Person"], {"name": "Charlie"})
 
-        result = db.execute("MATCH (p:Person) RETURN collect(p.name) AS names")
+        result = db.execute_cypher("MATCH (p:Person) RETURN collect(p.name) AS names")
         rows = list(result)
         names = rows[0]["names"]
         assert "Alice" in names
@@ -187,7 +191,7 @@ class TestCypherSpecificAggregations:
         db.create_node(["Person"], {"name": "Bob", "city": "NYC"})
         db.create_node(["Person"], {"name": "Charlie", "city": "LA"})
 
-        result = db.execute("MATCH (p:Person) RETURN collect(DISTINCT p.city) AS cities")
+        result = db.execute_cypher("MATCH (p:Person) RETURN collect(DISTINCT p.city) AS cities")
         rows = list(result)
         cities = rows[0]["cities"]
         assert len(cities) == 2
@@ -197,7 +201,7 @@ class TestCypherSpecificAggregations:
         for age in [20, 25, 30, 35, 40, 45, 50]:
             db.create_node(["Person"], {"name": f"P{age}", "age": age})
 
-        result = db.execute(
+        result = db.execute_cypher(
             "MATCH (p:Person) RETURN percentileDisc(p.age, 0.5) AS median_disc, percentileCont(p.age, 0.5) AS median_cont"
         )
         rows = list(result)
@@ -209,13 +213,13 @@ class TestCypherSpecificAggregations:
         db.create_node(["Person"], {"name": "B", "score": 20})
         db.create_node(["Person"], {"name": "C", "score": 30})
 
-        result = db.execute("MATCH (p:Person) RETURN stdev(p.score) AS sd")
+        result = db.execute_cypher("MATCH (p:Person) RETURN stdev(p.score) AS sd")
         rows = list(result)
         assert 8 <= rows[0]["sd"] <= 12
 
     def test_cypher_head_tail(self, db):
         """Test Cypher head() and tail() on lists."""
-        result = db.execute("WITH [1, 2, 3, 4, 5] AS nums RETURN head(nums) AS first, tail(nums) AS rest")
+        result = db.execute_cypher("WITH [1, 2, 3, 4, 5] AS nums RETURN head(nums) AS first, tail(nums) AS rest")
         rows = list(result)
         assert rows[0]["first"] == 1
         assert rows[0]["rest"] == [2, 3, 4, 5]

@@ -1,12 +1,12 @@
 ---
-title: grafeo.Database
+title: grafeo.GrafeoDB
 description: Database class reference.
 tags:
   - api
   - python
 ---
 
-# grafeo.Database
+# grafeo.GrafeoDB
 
 The main database class.
 
@@ -59,7 +59,7 @@ def checkpoint(self) -> None
 ## Context Manager
 
 ```python
-with grafeo.Database(path="db.grafeo") as db:
+with grafeo.GrafeoDB(path="db.grafeo") as db:
     with db.session() as session:
         session.execute("...")
 ```

@@ -3,11 +3,11 @@
 //! Translates SPARQL 1.1 AST to the common logical plan representation.
 
 use crate::query::plan::{
-    AddGraphOp, AggregateExpr, AggregateFunction, AggregateOp, BinaryOp, BindOp, ClearGraphOp,
-    CopyGraphOp, CreateGraphOp, DeleteTripleOp, DistinctOp, DropGraphOp, FilterOp, InsertTripleOp,
-    JoinOp, JoinType, LimitOp, LoadGraphOp, LogicalExpression, LogicalOperator, LogicalPlan,
-    MoveGraphOp, ProjectOp, Projection, SkipOp, SortKey, SortOp, SortOrder, TripleComponent,
-    TripleScanOp, UnaryOp, UnionOp,
+    AddGraphOp, AggregateExpr, AggregateFunction, AggregateOp, AntiJoinOp, BinaryOp, BindOp,
+    ClearGraphOp, CopyGraphOp, CreateGraphOp, DeleteTripleOp, DistinctOp, DropGraphOp, FilterOp,
+    InsertTripleOp, JoinOp, JoinType, LeftJoinOp, LimitOp, LoadGraphOp, LogicalExpression,
+    LogicalOperator, LogicalPlan, ModifyOp, MoveGraphOp, ProjectOp, Projection, SkipOp, SortKey,
+    SortOp, SortOrder, TripleComponent, TripleScanOp, TripleTemplate, UnaryOp, UnionOp,
 };
 use grafeo_adapters::query::sparql::{self, ast};
 use grafeo_common::types::Value;
@@ -69,18 +69,29 @@ impl SparqlTranslator {
         // Start with the WHERE clause pattern
         let mut plan = self.translate_graph_pattern(&select.where_clause)?;
 
-        // Apply GROUP BY if present
-        if let Some(group_by) = &select.solution_modifiers.group_by {
+        // Check if projection contains aggregates (handles both explicit GROUP BY and implicit aggregation)
+        let has_aggregates = Self::has_aggregates_in_projection(&select.projection);
+
+        // Apply GROUP BY if present, OR create aggregate for implicit aggregation
+        if has_aggregates || select.solution_modifiers.group_by.is_some() {
             let (aggregates, _group_exprs) = self.extract_aggregates_for_select(select)?;
-            let group_by_exprs = group_by
-                .iter()
-                .map(|g| self.translate_group_condition(g))
-                .collect::<Result<Vec<_>>>()?;
+
+            // Get explicit GROUP BY expressions, or empty vec for whole-dataset aggregation
+            let group_by_exprs = if let Some(group_by) = &select.solution_modifiers.group_by {
+                group_by
+                    .iter()
+                    .map(|g| self.translate_group_condition(g))
+                    .collect::<Result<Vec<_>>>()?
+            } else {
+                // No GROUP BY means aggregate over entire dataset (empty group_by)
+                Vec::new()
+            };
 
             plan = LogicalOperator::Aggregate(AggregateOp {
                 group_by: group_by_exprs,
                 aggregates,
                 input: Box::new(plan),
+                having: None, // SPARQL HAVING handled as separate Filter below
             });
 
             // Apply HAVING if present
@@ -133,16 +144,20 @@ impl SparqlTranslator {
         if select.modifier == ast::SelectModifier::Distinct {
             plan = LogicalOperator::Distinct(DistinctOp {
                 input: Box::new(plan),
+                columns: None,
             });
         }
 
-        // Apply projection
-        let projections = self.translate_projection(&select.projection)?;
-        if !projections.is_empty() {
-            plan = LogicalOperator::Project(ProjectOp {
-                projections,
-                input: Box::new(plan),
-            });
+        // Apply projection (but NOT for aggregate queries - aggregate already produces correct columns)
+        // For aggregate queries, the AggregateOp outputs columns with proper aliases
+        if !has_aggregates {
+            let projections = self.translate_projection(&select.projection)?;
+            if !projections.is_empty() {
+                plan = LogicalOperator::Project(ProjectOp {
+                    projections,
+                    input: Box::new(plan),
+                });
+            }
         }
 
         Ok(LogicalPlan::new(plan))
@@ -343,13 +358,13 @@ impl SparqlTranslator {
         insert_template: &Option<Vec<ast::QuadPattern>>,
         where_clause: &ast::GraphPattern,
     ) -> Result<LogicalPlan> {
-        // First, translate the WHERE clause to get bindings
-        let match_plan = self.translate_graph_pattern(where_clause)?;
+        // Translate the WHERE clause - this will be evaluated once and shared
+        let where_plan = self.translate_graph_pattern(where_clause)?;
 
         let default_graph = with_graph.as_ref().map(|g| self.resolve_iri(g));
 
-        // Build delete operators
-        let mut delete_ops = Vec::new();
+        // Build DELETE templates
+        let mut delete_templates = Vec::new();
         if let Some(delete_quads) = delete_template {
             for quad in delete_quads {
                 let subject = self.translate_triple_term(&quad.triple.subject)?;
@@ -361,18 +376,17 @@ impl SparqlTranslator {
                     .map(|g| self.resolve_variable_or_iri(g))
                     .or_else(|| default_graph.clone());
 
-                delete_ops.push(LogicalOperator::DeleteTriple(DeleteTripleOp {
+                delete_templates.push(TripleTemplate {
                     subject,
                     predicate,
                     object,
                     graph,
-                    input: Some(Box::new(match_plan.clone())),
-                }));
+                });
             }
         }
 
-        // Build insert operators
-        let mut insert_ops = Vec::new();
+        // Build INSERT templates
+        let mut insert_templates = Vec::new();
         if let Some(insert_quads) = insert_template {
             for quad in insert_quads {
                 let subject = self.translate_triple_term(&quad.triple.subject)?;
@@ -384,29 +398,25 @@ impl SparqlTranslator {
                     .map(|g| self.resolve_variable_or_iri(g))
                     .or_else(|| default_graph.clone());
 
-                insert_ops.push(LogicalOperator::InsertTriple(InsertTripleOp {
+                insert_templates.push(TripleTemplate {
                     subject,
                     predicate,
                     object,
                     graph,
-                    input: Some(Box::new(match_plan.clone())),
-                }));
+                });
             }
         }
 
-        // Combine all operations
-        let mut all_ops = delete_ops;
-        all_ops.extend(insert_ops);
-
-        if all_ops.is_empty() {
-            Ok(LogicalPlan::new(LogicalOperator::Empty))
-        } else if all_ops.len() == 1 {
-            Ok(LogicalPlan::new(all_ops.into_iter().next().unwrap()))
-        } else {
-            Ok(LogicalPlan::new(LogicalOperator::Union(UnionOp {
-                inputs: all_ops,
-            })))
-        }
+        // Use ModifyOp which handles SPARQL MODIFY semantics correctly:
+        // 1. Evaluate WHERE once
+        // 2. Apply DELETE templates
+        // 3. Apply INSERT templates (using same bindings)
+        Ok(LogicalPlan::new(LogicalOperator::Modify(ModifyOp {
+            delete_templates,
+            insert_templates,
+            where_clause: Box::new(where_plan),
+            graph: default_graph,
+        })))
     }
 
     fn translate_load(
@@ -520,18 +530,97 @@ impl SparqlTranslator {
             ast::GraphPattern::Basic(triples) => self.translate_basic_pattern(triples),
 
             ast::GraphPattern::Group(patterns) => {
-                let mut plan = LogicalOperator::Empty;
+                // Categorize patterns by type for proper composition
+                let mut basic_patterns: Vec<&ast::GraphPattern> = Vec::new();
+                let mut filter_exprs: Vec<&ast::Expression> = Vec::new();
+                let mut optional_patterns: Vec<&ast::GraphPattern> = Vec::new();
+                let mut minus_patterns: Vec<&ast::GraphPattern> = Vec::new();
+                let mut bind_patterns: Vec<(&ast::Expression, &String)> = Vec::new();
+
                 for p in patterns {
+                    match p {
+                        ast::GraphPattern::Filter(expr) => filter_exprs.push(expr),
+                        ast::GraphPattern::Optional(inner) => optional_patterns.push(inner),
+                        ast::GraphPattern::Minus(inner) => minus_patterns.push(inner),
+                        ast::GraphPattern::Bind {
+                            expression,
+                            variable,
+                        } => bind_patterns.push((expression, variable)),
+                        _ => basic_patterns.push(p),
+                    }
+                }
+
+                // 1. Translate and join basic/required patterns
+                let mut plan = LogicalOperator::Empty;
+                for p in basic_patterns {
                     let p_plan = self.translate_graph_pattern(p)?;
                     plan = self.join_patterns(plan, p_plan);
                 }
+
+                // 2. Apply BIND expressions (adds computed columns)
+                for (expression, variable) in bind_patterns {
+                    let expr = self.translate_expression(expression)?;
+                    plan = LogicalOperator::Bind(BindOp {
+                        expression: expr,
+                        variable: variable.clone(),
+                        input: Box::new(plan),
+                    });
+                }
+
+                // 3. Apply OPTIONAL patterns (left outer joins)
+                for inner in optional_patterns {
+                    let inner_plan = self.translate_graph_pattern(inner)?;
+                    if matches!(plan, LogicalOperator::Empty) {
+                        plan = inner_plan;
+                    } else {
+                        plan = LogicalOperator::LeftJoin(LeftJoinOp {
+                            left: Box::new(plan),
+                            right: Box::new(inner_plan),
+                            condition: None,
+                        });
+                    }
+                }
+
+                // 4. Apply MINUS patterns (anti joins)
+                for inner in minus_patterns {
+                    let inner_plan = self.translate_graph_pattern(inner)?;
+                    if !matches!(plan, LogicalOperator::Empty) {
+                        plan = LogicalOperator::AntiJoin(AntiJoinOp {
+                            left: Box::new(plan),
+                            right: Box::new(inner_plan),
+                        });
+                    }
+                }
+
+                // 5. Apply FILTER expressions last (they scope over entire group)
+                if !filter_exprs.is_empty() {
+                    let predicates: Vec<LogicalExpression> = filter_exprs
+                        .into_iter()
+                        .map(|e| self.translate_expression(e))
+                        .collect::<Result<Vec<_>>>()?;
+
+                    // Combine all predicates with AND
+                    let combined = predicates
+                        .into_iter()
+                        .reduce(|acc, pred| LogicalExpression::Binary {
+                            left: Box::new(acc),
+                            op: BinaryOp::And,
+                            right: Box::new(pred),
+                        })
+                        .unwrap();
+
+                    plan = LogicalOperator::Filter(FilterOp {
+                        predicate: combined,
+                        input: Box::new(plan),
+                    });
+                }
+
                 Ok(plan)
             }
 
             ast::GraphPattern::Optional(inner) => {
-                // OPTIONAL creates a left outer join
-                let inner_plan = self.translate_graph_pattern(inner)?;
-                Ok(inner_plan)
+                // Standalone OPTIONAL - handled in Group translation, but support direct call
+                self.translate_graph_pattern(inner)
             }
 
             ast::GraphPattern::Union(alternatives) => {
@@ -544,13 +633,13 @@ impl SparqlTranslator {
             }
 
             ast::GraphPattern::Minus(inner) => {
-                // MINUS is an anti-join
-                let inner_plan = self.translate_graph_pattern(inner)?;
-                Ok(inner_plan)
+                // Standalone MINUS - handled in Group translation, but support direct call
+                self.translate_graph_pattern(inner)
             }
 
             ast::GraphPattern::Filter(expr) => {
-                // Standalone FILTER - will be combined with its context
+                // Standalone FILTER - handled in Group translation, but support direct call
+                // This can happen when Filter is the top-level pattern
                 let predicate = self.translate_expression(expr)?;
                 Ok(LogicalOperator::Filter(FilterOp {
                     predicate,
@@ -562,6 +651,7 @@ impl SparqlTranslator {
                 expression,
                 variable,
             } => {
+                // Standalone BIND - handled in Group translation, but support direct call
                 let expr = self.translate_expression(expression)?;
                 Ok(LogicalOperator::Bind(BindOp {
                     expression: expr,
@@ -711,7 +801,11 @@ impl SparqlTranslator {
                     .iter()
                     .map(|a| self.translate_expression(a))
                     .collect::<Result<Vec<_>>>()?;
-                Ok(LogicalExpression::FunctionCall { name, args })
+                Ok(LogicalExpression::FunctionCall {
+                    name,
+                    args,
+                    distinct: false,
+                })
             }
 
             ast::Expression::Bound(var) => {
@@ -719,6 +813,7 @@ impl SparqlTranslator {
                 Ok(LogicalExpression::FunctionCall {
                     name: "BOUND".to_string(),
                     args: vec![LogicalExpression::Variable(var.clone())],
+                    distinct: false,
                 })
             }
 
@@ -745,6 +840,7 @@ impl SparqlTranslator {
                 Ok(LogicalExpression::FunctionCall {
                     name: "COALESCE".to_string(),
                     args,
+                    distinct: false,
                 })
             }
 
@@ -753,6 +849,7 @@ impl SparqlTranslator {
                 Ok(LogicalExpression::FunctionCall {
                     name: "EXISTS".to_string(),
                     args: vec![],
+                    distinct: false,
                 })
             }
 
@@ -761,6 +858,7 @@ impl SparqlTranslator {
                 Ok(LogicalExpression::FunctionCall {
                     name: "NOT_EXISTS".to_string(),
                     args: vec![],
+                    distinct: false,
                 })
             }
 
@@ -803,14 +901,14 @@ impl SparqlTranslator {
         &mut self,
         agg: &ast::AggregateExpression,
     ) -> Result<LogicalExpression> {
-        let func_name = match agg {
-            ast::AggregateExpression::Count { .. } => "COUNT",
-            ast::AggregateExpression::Sum { .. } => "SUM",
-            ast::AggregateExpression::Average { .. } => "AVG",
-            ast::AggregateExpression::Minimum { .. } => "MIN",
-            ast::AggregateExpression::Maximum { .. } => "MAX",
-            ast::AggregateExpression::Sample { .. } => "SAMPLE",
-            ast::AggregateExpression::GroupConcat { .. } => "GROUP_CONCAT",
+        let (func_name, distinct) = match agg {
+            ast::AggregateExpression::Count { distinct, .. } => ("COUNT", *distinct),
+            ast::AggregateExpression::Sum { distinct, .. } => ("SUM", *distinct),
+            ast::AggregateExpression::Average { distinct, .. } => ("AVG", *distinct),
+            ast::AggregateExpression::Minimum { .. } => ("MIN", false),
+            ast::AggregateExpression::Maximum { .. } => ("MAX", false),
+            ast::AggregateExpression::Sample { .. } => ("SAMPLE", false),
+            ast::AggregateExpression::GroupConcat { distinct, .. } => ("GROUP_CONCAT", *distinct),
         };
 
         let args = match agg {
@@ -834,6 +932,7 @@ impl SparqlTranslator {
         Ok(LogicalExpression::FunctionCall {
             name: func_name.to_string(),
             args,
+            distinct,
         })
     }
 
@@ -908,6 +1007,46 @@ impl SparqlTranslator {
         matches!(expr, ast::Expression::Aggregate(_))
     }
 
+    /// Recursively checks if an expression contains any aggregate function.
+    fn contains_aggregate(expr: &ast::Expression) -> bool {
+        match expr {
+            ast::Expression::Aggregate(_) => true,
+            ast::Expression::Binary { left, right, .. } => {
+                Self::contains_aggregate(left) || Self::contains_aggregate(right)
+            }
+            ast::Expression::Unary { operand, .. } => Self::contains_aggregate(operand),
+            ast::Expression::FunctionCall { arguments, .. } => {
+                arguments.iter().any(Self::contains_aggregate)
+            }
+            ast::Expression::Bracketed(inner) => Self::contains_aggregate(inner),
+            ast::Expression::Conditional {
+                condition,
+                then_expression,
+                else_expression,
+            } => {
+                Self::contains_aggregate(condition)
+                    || Self::contains_aggregate(then_expression)
+                    || Self::contains_aggregate(else_expression)
+            }
+            ast::Expression::Coalesce(exprs) => exprs.iter().any(Self::contains_aggregate),
+            ast::Expression::In { expression, list }
+            | ast::Expression::NotIn { expression, list } => {
+                Self::contains_aggregate(expression) || list.iter().any(Self::contains_aggregate)
+            }
+            _ => false,
+        }
+    }
+
+    /// Checks if the SELECT projection contains any aggregate expressions.
+    fn has_aggregates_in_projection(projection: &ast::Projection) -> bool {
+        match projection {
+            ast::Projection::Wildcard => false,
+            ast::Projection::Variables(vars) => vars
+                .iter()
+                .any(|pv| Self::contains_aggregate(&pv.expression)),
+        }
+    }
+
     fn extract_aggregate(
         &mut self,
         expr: &ast::Expression,
@@ -963,6 +1102,7 @@ impl SparqlTranslator {
                 expression,
                 distinct,
                 alias: alias.clone(),
+                percentile: None, // SPARQL doesn't support percentile functions
             }))
         } else {
             Ok(None)

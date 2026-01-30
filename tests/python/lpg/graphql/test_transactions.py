@@ -50,14 +50,16 @@ class TestGraphQLTransactions(BaseTransactionsTest):
         """
 
     def count_query(self, label: str) -> str:
-        """Return GraphQL count query."""
+        """Return GraphQL query that returns all rows (base class will count them)."""
         return f"""
             query {{
-                {label.lower()}Count
+                {label.lower()} {{
+                    id
+                }}
             }}
         """
 
-    def execute_in_transaction(self, tx, query: str):
+    def execute_in_tx(self, tx, query: str):
         """Execute query in transaction context."""
         try:
             return tx.execute_graphql(query)

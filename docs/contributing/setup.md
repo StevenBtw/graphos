@@ -39,7 +39,7 @@ cargo test --workspace
 ## Build Python Package
 
 ```bash
-cd crates/grafeo-python
+cd crates/bindings/python
 uv add maturin
 maturin develop
 ```

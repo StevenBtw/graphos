@@ -10,6 +10,10 @@ from tests.python.bases.test_mutations import BaseMutationsTest
 class TestCypherMutations(BaseMutationsTest):
     """Cypher implementation of mutation tests."""
 
+    def execute_query(self, db, query):
+        """Execute query using Cypher parser."""
+        return db.execute_cypher(query)
+
     def create_node_query(self, labels: list[str], props: dict) -> str:
         """Cypher: CREATE (:<labels> {<props>}) RETURN n"""
         label_str = ":".join(labels) if labels else ""
@@ -73,62 +77,62 @@ class TestCypherSpecificMutations:
 
     def test_cypher_create_syntax(self, db):
         """Test Cypher CREATE syntax."""
-        result = db.execute("CREATE (n:Person {name: 'CreateTest', age: 42}) RETURN n")
+        result = db.execute_cypher("CREATE (n:Person {name: 'CreateTest', age: 42}) RETURN n")
         rows = list(result)
         assert len(rows) == 1
 
-        result = db.execute("MATCH (n:Person) WHERE n.name = 'CreateTest' RETURN n.age")
+        result = db.execute_cypher("MATCH (n:Person) WHERE n.name = 'CreateTest' RETURN n.age")
         rows = list(result)
         assert len(rows) == 1
         assert rows[0]["n.age"] == 42
 
     def test_cypher_merge(self, db):
         """Test Cypher MERGE (create if not exists)."""
-        db.execute("MERGE (c:City {name: 'NYC'}) RETURN c")
-        db.execute("MERGE (c:City {name: 'NYC'}) RETURN c")
+        db.execute_cypher("MERGE (c:City {name: 'NYC'}) RETURN c")
+        db.execute_cypher("MERGE (c:City {name: 'NYC'}) RETURN c")
 
-        result = db.execute("MATCH (c:City) RETURN count(c) AS cnt")
+        result = db.execute_cypher("MATCH (c:City) RETURN count(c) AS cnt")
         rows = list(result)
         assert rows[0]["cnt"] == 1
 
     def test_cypher_set(self, db):
         """Test Cypher SET for property update."""
-        db.execute("CREATE (p:Person {name: 'SetTest', verified: false})")
-        db.execute("MATCH (p:Person {name: 'SetTest'}) SET p.verified = true")
+        db.execute_cypher("CREATE (p:Person {name: 'SetTest', verified: false})")
+        db.execute_cypher("MATCH (p:Person {name: 'SetTest'}) SET p.verified = true")
 
-        result = db.execute("MATCH (p:Person {name: 'SetTest'}) RETURN p.verified")
+        result = db.execute_cypher("MATCH (p:Person {name: 'SetTest'}) RETURN p.verified")
         rows = list(result)
         assert rows[0]["p.verified"] is True
 
     def test_cypher_set_add_property(self, db):
         """Test Cypher SET to add new property."""
-        db.execute("CREATE (p:Person {name: 'AddProp'})")
-        db.execute("MATCH (p:Person {name: 'AddProp'}) SET p.newProp = 'added'")
+        db.execute_cypher("CREATE (p:Person {name: 'AddProp'})")
+        db.execute_cypher("MATCH (p:Person {name: 'AddProp'}) SET p.newProp = 'added'")
 
-        result = db.execute("MATCH (p:Person {name: 'AddProp'}) RETURN p.newProp")
+        result = db.execute_cypher("MATCH (p:Person {name: 'AddProp'}) RETURN p.newProp")
         rows = list(result)
         assert rows[0]["p.newProp"] == "added"
 
     def test_cypher_remove(self, db):
         """Test Cypher REMOVE property."""
-        db.execute("CREATE (p:Person {name: 'RemoveTest', toRemove: 'value'})")
-        db.execute("MATCH (p:Person {name: 'RemoveTest'}) REMOVE p.toRemove")
+        db.execute_cypher("CREATE (p:Person {name: 'RemoveTest', toRemove: 'value'})")
+        db.execute_cypher("MATCH (p:Person {name: 'RemoveTest'}) REMOVE p.toRemove")
 
-        result = db.execute("MATCH (p:Person {name: 'RemoveTest'}) RETURN p.toRemove")
+        result = db.execute_cypher("MATCH (p:Person {name: 'RemoveTest'}) RETURN p.toRemove")
         rows = list(result)
         assert rows[0].get("p.toRemove") is None
 
     def test_cypher_detach_delete(self, db):
         """Test Cypher DETACH DELETE (deletes node and all relationships)."""
-        db.execute("CREATE (a:Node {name: 'A'})")
-        db.execute("CREATE (b:Node {name: 'B'})")
-        db.execute("MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) CREATE (a)-[:CONNECTED]->(b)")
-        db.execute("MATCH (n:Node {name: 'A'}) DETACH DELETE n")
+        db.execute_cypher("CREATE (a:Node {name: 'A'})")
+        db.execute_cypher("CREATE (b:Node {name: 'B'})")
+        db.execute_cypher("MATCH (a:Node {name: 'A'}), (b:Node {name: 'B'}) CREATE (a)-[:CONNECTED]->(b)")
+        db.execute_cypher("MATCH (n:Node {name: 'A'}) DETACH DELETE n")
 
-        result = db.execute("MATCH (n:Node {name: 'A'}) RETURN n")
+        result = db.execute_cypher("MATCH (n:Node {name: 'A'}) RETURN n")
         rows = list(result)
         assert len(rows) == 0
 
-        result = db.execute("MATCH (n:Node {name: 'B'}) RETURN n")
+        result = db.execute_cypher("MATCH (n:Node {name: 'B'}) RETURN n")
         rows = list(result)
         assert len(rows) == 1

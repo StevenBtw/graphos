@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "Grafeo"
-version = "0.1.2"
+version = "0.1.3"
 description = "A high-performance, embeddable graph database with Python bindings"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -32,20 +32,26 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://grafeo.dev"
-Documentation = "https://grafeo.dev"
+Documentation = "https://grafeo.dev/user-guide/"
 Repository = "https://github.com/StevenBtw/grafeo"
 Issues = "https://github.com/StevenBtw/grafeo/issues"
 
 [project.optional-dependencies]
+cli = [
+    "click>=8.1.0",
+]
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
-    "ty>=0.13.0",
-    "ruff>=0.1",
+    "ty>=0.14.0",
+    "ruff>=0.14.14",
 ]
 
+[project.scripts]
+grafeo = "grafeo.cli:main"
+
 [tool.maturin]
-features = ["pyo3/extension-module"]
+features = ["pyo3/extension-module", "full"]
 python-source = "python"
 module-name = "grafeo"
 
@@ -60,5 +66,5 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
 
-[tool.ty]
+[tool.ty.environment]
 python-version = "3.12"

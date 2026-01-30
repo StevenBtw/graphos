@@ -6,11 +6,16 @@ Note: SPARQL mutations operate on RDF triples, not LPG nodes/edges.
 
 import pytest
 
+# Try to import grafeo
+try:
+    from grafeo import GrafeoDB
+    GRAFEO_AVAILABLE = True
+except ImportError:
+    GRAFEO_AVAILABLE = False
 
-# Skip all tests in this module if SPARQL Update is not available
 pytestmark = pytest.mark.skipif(
-    True,  # SPARQL Update execution not yet implemented
-    reason="SPARQL Update execution not yet implemented"
+    not GRAFEO_AVAILABLE,
+    reason="Grafeo Python bindings not installed"
 )
 
 

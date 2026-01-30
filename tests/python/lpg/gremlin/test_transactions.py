@@ -44,7 +44,7 @@ class TestGremlinTransactions(BaseTransactionsTest):
         """Return Gremlin count query."""
         return f"g.V().hasLabel('{label}').count()"
 
-    def execute_in_transaction(self, tx, query: str):
+    def execute_in_tx(self, tx, query: str):
         """Execute query in transaction context."""
         try:
             return tx.execute_gremlin(query)

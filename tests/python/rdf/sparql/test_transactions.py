@@ -2,17 +2,33 @@
 
 Tests transaction semantics with SPARQL operations.
 Note: Uses Python API for transaction control with SPARQL queries inside.
+
+IMPORTANT: The RDF store does not yet support versioned transactions like
+the LPG store. SPARQL UPDATE operations are applied immediately to the
+RDF store. Tests that rely on rollback behavior will fail until versioned
+transaction support is added to the RDF store.
 """
 
 import pytest
 from tests.python.bases.test_transactions import BaseTransactionsTest
 
+# Try to import grafeo
+try:
+    from grafeo import GrafeoDB
+    GRAFEO_AVAILABLE = True
+except ImportError:
+    GRAFEO_AVAILABLE = False
 
-# Skip all tests - SPARQL Update execution not yet implemented
 pytestmark = pytest.mark.skipif(
-    True,
-    reason="SPARQL Update execution not yet implemented"
+    not GRAFEO_AVAILABLE,
+    reason="Grafeo Python bindings not installed"
 )
+
+
+@pytest.fixture
+def db():
+    """Create a fresh database instance for each test."""
+    return GrafeoDB()
 
 
 class TestSPARQLTransactions(BaseTransactionsTest):
@@ -21,6 +37,14 @@ class TestSPARQLTransactions(BaseTransactionsTest):
     Note: Transactions are controlled via Python API.
     SPARQL queries and updates are executed within transactions.
     """
+
+    def execute_query(self, db, query):
+        """Execute a SPARQL query using db.execute_sparql()."""
+        return db.execute_sparql(query)
+
+    def execute_in_tx(self, tx, query):
+        """Execute a SPARQL query within a transaction."""
+        return tx.execute_sparql(query)
 
     def insert_query(self, labels: list, props: dict) -> str:
         """Build SPARQL INSERT DATA statement.
@@ -65,34 +89,56 @@ class TestSPARQLTransactions(BaseTransactionsTest):
             }}
         """
 
+    # Override rollback test to mark as expected failure
+    @pytest.mark.xfail(
+        reason="RDF store does not yet support versioned transactions - operations apply immediately"
+    )
+    def test_transaction_rollback(self, db):
+        """Test that rollback discards changes.
+
+        NOTE: This test is expected to fail because the RDF store does not yet
+        support versioned transactions. SPARQL UPDATE operations are applied
+        immediately to the RDF store.
+        """
+        super().test_transaction_rollback(db)
+
 
 class TestSPARQLTransactionVerification:
-    """Tests that verify transaction behavior with SPARQL."""
+    """Tests that verify transaction behavior with SPARQL.
 
-    def test_transaction_rollback_on_error(self, db_api):
+    These tests use the Python API (create_node, execute) which operates
+    on the LPG store, not the RDF store. They verify that transaction
+    semantics work correctly with the LPG store.
+    """
+
+    def setup_method(self):
+        """Create a fresh database."""
+        self.db = GrafeoDB()
+
+    def test_transaction_commit_on_success(self):
+        """Verify transaction commits on success."""
+        initial_count = len(list(self.db.execute("MATCH (n) RETURN n")))
+
+        with self.db.begin_transaction() as tx:
+            tx.execute("INSERT (:Test {name: 'committed'})")
+
+        # Count should be incremented
+        final_count = len(list(self.db.execute("MATCH (n) RETURN n")))
+        assert final_count == initial_count + 1
+
+    def test_transaction_rollback_on_error(self):
         """Verify transaction rollback on error."""
-        initial_count = len(list(db_api.execute("MATCH (n) RETURN n")))
+        initial_count = len(list(self.db.execute("MATCH (n) RETURN n")))
 
         try:
-            with db_api.transaction():
+            with self.db.begin_transaction() as tx:
                 # Create a node
-                db_api.create_node(["Test"], {"name": "temp"})
+                tx.execute("INSERT (:Test {name: 'temp'})")
                 # Simulate an error
                 raise ValueError("Simulated error")
         except ValueError:
             pass
 
         # Count should be unchanged
-        final_count = len(list(db_api.execute("MATCH (n) RETURN n")))
+        final_count = len(list(self.db.execute("MATCH (n) RETURN n")))
         assert final_count == initial_count
-
-    def test_transaction_commit_on_success(self, db_api):
-        """Verify transaction commits on success."""
-        initial_count = len(list(db_api.execute("MATCH (n) RETURN n")))
-
-        with db_api.transaction():
-            db_api.create_node(["Test"], {"name": "committed"})
-
-        # Count should be incremented
-        final_count = len(list(db_api.execute("MATCH (n) RETURN n")))
-        assert final_count == initial_count + 1

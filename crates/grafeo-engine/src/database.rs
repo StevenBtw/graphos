@@ -240,7 +240,29 @@ impl GrafeoDB {
     /// ```
     #[must_use]
     pub fn session(&self) -> Session {
-        Session::new(Arc::clone(&self.store), Arc::clone(&self.tx_manager))
+        #[cfg(feature = "rdf")]
+        {
+            Session::with_rdf_store_and_adaptive(
+                Arc::clone(&self.store),
+                Arc::clone(&self.rdf_store),
+                Arc::clone(&self.tx_manager),
+                self.config.adaptive.clone(),
+            )
+        }
+        #[cfg(not(feature = "rdf"))]
+        {
+            Session::with_adaptive(
+                Arc::clone(&self.store),
+                Arc::clone(&self.tx_manager),
+                self.config.adaptive.clone(),
+            )
+        }
+    }
+
+    /// Returns the adaptive execution configuration.
+    #[must_use]
+    pub fn adaptive_config(&self) -> &crate::config::AdaptiveConfig {
+        &self.config.adaptive
     }
 
     /// Runs a query directly on the database.
@@ -269,6 +291,35 @@ impl GrafeoDB {
     ) -> Result<QueryResult> {
         let session = self.session();
         session.execute_with_params(query, params)
+    }
+
+    /// Executes a Cypher query and returns the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    #[cfg(feature = "cypher")]
+    pub fn execute_cypher(&self, query: &str) -> Result<QueryResult> {
+        let session = self.session();
+        session.execute_cypher(query)
+    }
+
+    /// Executes a Cypher query with parameters and returns the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    #[cfg(feature = "cypher")]
+    pub fn execute_cypher_with_params(
+        &self,
+        query: &str,
+        params: std::collections::HashMap<String, grafeo_common::types::Value>,
+    ) -> Result<QueryResult> {
+        use crate::query::processor::{QueryLanguage, QueryProcessor};
+
+        // Create processor
+        let processor = QueryProcessor::for_lpg(Arc::clone(&self.store));
+        processor.process(query, QueryLanguage::Cypher, Some(&params))
     }
 
     /// Executes a Gremlin query and returns the result.
@@ -759,6 +810,398 @@ impl GrafeoDB {
     pub fn remove_edge_property(&self, id: grafeo_common::types::EdgeId, key: &str) -> bool {
         // Note: RemoveProperty WAL records not yet implemented, but operation works in memory
         self.store.remove_edge_property(id, key).is_some()
+    }
+
+    // =========================================================================
+    // ADMIN API: Introspection
+    // =========================================================================
+
+    /// Returns true if this database is backed by a file (persistent).
+    ///
+    /// In-memory databases return false.
+    #[must_use]
+    pub fn is_persistent(&self) -> bool {
+        self.config.path.is_some()
+    }
+
+    /// Returns the database file path, if persistent.
+    ///
+    /// In-memory databases return None.
+    #[must_use]
+    pub fn path(&self) -> Option<&Path> {
+        self.config.path.as_deref()
+    }
+
+    /// Returns high-level database information.
+    ///
+    /// Includes node/edge counts, persistence status, and mode (LPG/RDF).
+    #[must_use]
+    pub fn info(&self) -> crate::admin::DatabaseInfo {
+        crate::admin::DatabaseInfo {
+            mode: crate::admin::DatabaseMode::Lpg,
+            node_count: self.store.node_count(),
+            edge_count: self.store.edge_count(),
+            is_persistent: self.is_persistent(),
+            path: self.config.path.clone(),
+            wal_enabled: self.config.wal_enabled,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+
+    /// Returns detailed database statistics.
+    ///
+    /// Includes counts, memory usage, and index information.
+    #[must_use]
+    pub fn detailed_stats(&self) -> crate::admin::DatabaseStats {
+        let disk_bytes = self.config.path.as_ref().and_then(|p| {
+            if p.exists() {
+                Self::calculate_disk_usage(p).ok()
+            } else {
+                None
+            }
+        });
+
+        crate::admin::DatabaseStats {
+            node_count: self.store.node_count(),
+            edge_count: self.store.edge_count(),
+            label_count: self.store.label_count(),
+            edge_type_count: self.store.edge_type_count(),
+            property_key_count: self.store.property_key_count(),
+            index_count: 0, // TODO: implement index tracking
+            memory_bytes: self.buffer_manager.allocated(),
+            disk_bytes,
+        }
+    }
+
+    /// Calculates total disk usage for the database directory.
+    fn calculate_disk_usage(path: &Path) -> Result<usize> {
+        let mut total = 0usize;
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path)? {
+                let entry = entry?;
+                let metadata = entry.metadata()?;
+                if metadata.is_file() {
+                    total += metadata.len() as usize;
+                } else if metadata.is_dir() {
+                    total += Self::calculate_disk_usage(&entry.path())?;
+                }
+            }
+        }
+        Ok(total)
+    }
+
+    /// Returns schema information (labels, edge types, property keys).
+    ///
+    /// For LPG mode, returns label and edge type information.
+    /// For RDF mode, returns predicate and named graph information.
+    #[must_use]
+    pub fn schema(&self) -> crate::admin::SchemaInfo {
+        let labels = self
+            .store
+            .all_labels()
+            .into_iter()
+            .map(|name| crate::admin::LabelInfo {
+                name: name.clone(),
+                count: self.store.nodes_with_label(&name).count(),
+            })
+            .collect();
+
+        let edge_types = self
+            .store
+            .all_edge_types()
+            .into_iter()
+            .map(|name| crate::admin::EdgeTypeInfo {
+                name: name.clone(),
+                count: self.store.edges_with_type(&name).count(),
+            })
+            .collect();
+
+        let property_keys = self.store.all_property_keys();
+
+        crate::admin::SchemaInfo::Lpg(crate::admin::LpgSchemaInfo {
+            labels,
+            edge_types,
+            property_keys,
+        })
+    }
+
+    /// Returns RDF schema information.
+    ///
+    /// Only available when the RDF feature is enabled.
+    #[cfg(feature = "rdf")]
+    #[must_use]
+    pub fn rdf_schema(&self) -> crate::admin::SchemaInfo {
+        let stats = self.rdf_store.stats();
+
+        let predicates = self
+            .rdf_store
+            .predicates()
+            .into_iter()
+            .map(|predicate| {
+                let count = self.rdf_store.triples_with_predicate(&predicate).len();
+                crate::admin::PredicateInfo {
+                    iri: predicate.to_string(),
+                    count,
+                }
+            })
+            .collect();
+
+        crate::admin::SchemaInfo::Rdf(crate::admin::RdfSchemaInfo {
+            predicates,
+            named_graphs: Vec::new(), // Named graphs not yet implemented in RdfStore
+            subject_count: stats.subject_count,
+            object_count: stats.object_count,
+        })
+    }
+
+    /// Validates database integrity.
+    ///
+    /// Checks for:
+    /// - Dangling edge references (edges pointing to non-existent nodes)
+    /// - Internal index consistency
+    ///
+    /// Returns a list of errors and warnings. Empty errors = valid.
+    #[must_use]
+    pub fn validate(&self) -> crate::admin::ValidationResult {
+        let mut result = crate::admin::ValidationResult::default();
+
+        // Check for dangling edge references
+        for edge in self.store.all_edges() {
+            if self.store.get_node(edge.src).is_none() {
+                result.errors.push(crate::admin::ValidationError {
+                    code: "DANGLING_SRC".to_string(),
+                    message: format!(
+                        "Edge {} references non-existent source node {}",
+                        edge.id.0, edge.src.0
+                    ),
+                    context: Some(format!("edge:{}", edge.id.0)),
+                });
+            }
+            if self.store.get_node(edge.dst).is_none() {
+                result.errors.push(crate::admin::ValidationError {
+                    code: "DANGLING_DST".to_string(),
+                    message: format!(
+                        "Edge {} references non-existent destination node {}",
+                        edge.id.0, edge.dst.0
+                    ),
+                    context: Some(format!("edge:{}", edge.id.0)),
+                });
+            }
+        }
+
+        // Add warnings for potential issues
+        if self.store.node_count() > 0 && self.store.edge_count() == 0 {
+            result.warnings.push(crate::admin::ValidationWarning {
+                code: "NO_EDGES".to_string(),
+                message: "Database has nodes but no edges".to_string(),
+                context: None,
+            });
+        }
+
+        result
+    }
+
+    /// Returns WAL (Write-Ahead Log) status.
+    ///
+    /// Returns None if WAL is not enabled.
+    #[must_use]
+    pub fn wal_status(&self) -> crate::admin::WalStatus {
+        if let Some(ref wal) = self.wal {
+            crate::admin::WalStatus {
+                enabled: true,
+                path: self.config.path.as_ref().map(|p| p.join("wal")),
+                size_bytes: wal.size_bytes(),
+                record_count: wal.record_count() as usize,
+                last_checkpoint: wal.last_checkpoint_timestamp(),
+                current_epoch: self.store.current_epoch().as_u64(),
+            }
+        } else {
+            crate::admin::WalStatus {
+                enabled: false,
+                path: None,
+                size_bytes: 0,
+                record_count: 0,
+                last_checkpoint: None,
+                current_epoch: self.store.current_epoch().as_u64(),
+            }
+        }
+    }
+
+    /// Forces a WAL checkpoint.
+    ///
+    /// Flushes all pending WAL records to the main storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the checkpoint fails.
+    pub fn wal_checkpoint(&self) -> Result<()> {
+        if let Some(ref wal) = self.wal {
+            let epoch = self.store.current_epoch();
+            let tx_id = self
+                .tx_manager
+                .last_assigned_tx_id()
+                .unwrap_or_else(|| self.tx_manager.begin());
+            wal.checkpoint(tx_id, epoch)?;
+            wal.sync()?;
+        }
+        Ok(())
+    }
+
+    // =========================================================================
+    // ADMIN API: Persistence Control
+    // =========================================================================
+
+    /// Saves the database to a file path.
+    ///
+    /// - If in-memory: creates a new persistent database at path
+    /// - If file-backed: creates a copy at the new path
+    ///
+    /// The original database remains unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the save operation fails.
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+
+        // Create target database with WAL enabled
+        let target_config = Config::persistent(path);
+        let target = Self::with_config(target_config)?;
+
+        // Copy all nodes using WAL-enabled methods
+        for node in self.store.all_nodes() {
+            let label_refs: Vec<&str> = node.labels.iter().map(|s| &**s).collect();
+            target.store.create_node_with_id(node.id, &label_refs);
+
+            // Log to WAL
+            target.log_wal(&WalRecord::CreateNode {
+                id: node.id,
+                labels: node.labels.iter().map(|s| s.to_string()).collect(),
+            })?;
+
+            // Copy properties
+            for (key, value) in node.properties {
+                target
+                    .store
+                    .set_node_property(node.id, key.as_str(), value.clone());
+                target.log_wal(&WalRecord::SetNodeProperty {
+                    id: node.id,
+                    key: key.to_string(),
+                    value,
+                })?;
+            }
+        }
+
+        // Copy all edges using WAL-enabled methods
+        for edge in self.store.all_edges() {
+            target
+                .store
+                .create_edge_with_id(edge.id, edge.src, edge.dst, &edge.edge_type);
+
+            // Log to WAL
+            target.log_wal(&WalRecord::CreateEdge {
+                id: edge.id,
+                src: edge.src,
+                dst: edge.dst,
+                edge_type: edge.edge_type.to_string(),
+            })?;
+
+            // Copy properties
+            for (key, value) in edge.properties {
+                target
+                    .store
+                    .set_edge_property(edge.id, key.as_str(), value.clone());
+                target.log_wal(&WalRecord::SetEdgeProperty {
+                    id: edge.id,
+                    key: key.to_string(),
+                    value,
+                })?;
+            }
+        }
+
+        // Checkpoint and close the target database
+        target.close()?;
+
+        Ok(())
+    }
+
+    /// Creates an in-memory copy of this database.
+    ///
+    /// Returns a new database that is completely independent.
+    /// Useful for:
+    /// - Testing modifications without affecting the original
+    /// - Faster operations when persistence isn't needed
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the copy operation fails.
+    pub fn to_memory(&self) -> Result<Self> {
+        let config = Config::in_memory();
+        let target = Self::with_config(config)?;
+
+        // Copy all nodes
+        for node in self.store.all_nodes() {
+            let label_refs: Vec<&str> = node.labels.iter().map(|s| &**s).collect();
+            target.store.create_node_with_id(node.id, &label_refs);
+
+            // Copy properties
+            for (key, value) in node.properties {
+                target.store.set_node_property(node.id, key.as_str(), value);
+            }
+        }
+
+        // Copy all edges
+        for edge in self.store.all_edges() {
+            target
+                .store
+                .create_edge_with_id(edge.id, edge.src, edge.dst, &edge.edge_type);
+
+            // Copy properties
+            for (key, value) in edge.properties {
+                target.store.set_edge_property(edge.id, key.as_str(), value);
+            }
+        }
+
+        Ok(target)
+    }
+
+    /// Opens a database file and loads it entirely into memory.
+    ///
+    /// The returned database has no connection to the original file.
+    /// Changes will NOT be written back to the file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file can't be opened or loaded.
+    pub fn open_in_memory(path: impl AsRef<Path>) -> Result<Self> {
+        // Open the source database (triggers WAL recovery)
+        let source = Self::open(path)?;
+
+        // Create in-memory copy
+        let target = source.to_memory()?;
+
+        // Close the source (releases file handles)
+        source.close()?;
+
+        Ok(target)
+    }
+
+    // =========================================================================
+    // ADMIN API: Iteration
+    // =========================================================================
+
+    /// Returns an iterator over all nodes in the database.
+    ///
+    /// Useful for dump/export operations.
+    pub fn iter_nodes(&self) -> impl Iterator<Item = grafeo_core::graph::lpg::Node> + '_ {
+        self.store.all_nodes()
+    }
+
+    /// Returns an iterator over all edges in the database.
+    ///
+    /// Useful for dump/export operations.
+    pub fn iter_edges(&self) -> impl Iterator<Item = grafeo_core::graph::lpg::Edge> + '_ {
+        self.store.all_edges()
     }
 }
 

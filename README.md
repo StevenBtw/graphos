@@ -14,17 +14,33 @@ A pure-Rust, high-performance, embeddable graph database supporting both **Label
 
 ## Features
 
+### Core Capabilities
+
 - **Dual data model support**: LPG and RDF with optimized storage for each
 - **Multi-language queries**: GQL, Cypher, Gremlin, GraphQL, and SPARQL
+- Embeddable with zero external dependencies
+- Python bindings via PyO3
+- In-memory and persistent storage modes
+- MVCC transactions with snapshot isolation
+
+### Query Languages
+
 - **GQL** (ISO/IEC 39075) - enabled by default
 - **Cypher** (openCypher 9.0) - via feature flag
 - **Gremlin** (Apache TinkerPop) - via feature flag
 - **GraphQL** - via feature flag, supports both LPG and RDF
 - **SPARQL** (W3C 1.1) - via feature flag for RDF queries
-- Embeddable with zero external dependencies
-- Python bindings via PyO3
-- In-memory and persistent storage modes
-- MVCC transactions with snapshot isolation
+
+### Performance Features
+
+- **Push-based vectorized execution** with adaptive chunk sizing
+- **Morsel-driven parallelism** with auto-detected thread count
+- **Columnar storage** with dictionary, delta, and RLE compression
+- **Cost-based optimizer** with DPccp join ordering and histograms
+- **Zone maps** for intelligent data skipping
+- **Adaptive query execution** with runtime re-optimization
+- **Transparent spilling** for out-of-core processing
+- **Bloom filters** for efficient membership tests
 
 ## Query Language & Data Model Support
 
@@ -66,6 +82,12 @@ cargo add grafeo --features full     # All query languages
 uv add grafeo
 ```
 
+With CLI support:
+
+```bash
+uv add grafeo[cli]
+```
+
 ## Quick Start
 
 ### Python
@@ -103,6 +125,25 @@ node = db.create_node(["Person"], {"name": "Carol"})
 print(f"Created node with ID: {node.id}")
 ```
 
+### Admin APIs (Python)
+
+```python
+# Database inspection
+db.info()           # Overview: mode, counts, persistence
+db.detailed_stats() # Memory usage, index counts
+db.schema()         # Labels, edge types, property keys
+db.validate()       # Integrity check
+
+# Persistence control
+db.save("/path/to/backup")    # Save to disk
+db.to_memory()                # Create in-memory copy
+GrafeoDB.open_in_memory(path) # Load as in-memory
+
+# WAL management
+db.wal_status()      # WAL info
+db.wal_checkpoint()  # Force checkpoint
+```
+
 ### Rust
 
 ```rust
@@ -125,6 +166,33 @@ fn main() {
 }
 ```
 
+## Command-Line Interface
+
+Optional admin CLI for operators and DevOps:
+
+```bash
+# Install with CLI support
+uv add grafeo[cli]
+
+# Inspection
+grafeo info ./mydb              # Overview: counts, size, mode
+grafeo stats ./mydb             # Detailed statistics
+grafeo schema ./mydb            # Labels, edge types, property keys
+grafeo validate ./mydb          # Integrity check
+
+# Backup & restore
+grafeo backup create ./mydb -o backup
+grafeo backup restore backup ./copy --force
+
+# WAL management
+grafeo wal status ./mydb
+grafeo wal checkpoint ./mydb
+
+# Output formats
+grafeo info ./mydb --format json  # Machine-readable JSON
+grafeo info ./mydb --format table # Human-readable table (default)
+```
+
 ## Documentation
 
 Full documentation is available at [grafeo.dev](https://grafeo.dev).
@@ -132,6 +200,13 @@ Full documentation is available at [grafeo.dev](https://grafeo.dev).
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+## Acknowledgments
+
+Grafeo's executiong engine draws inspiration from:
+
+- [DuckDB](https://duckdb.org/), vectorized push-based execution, morsel-driven parallelism
+- [LadybugDB](https://github.com/LadybugDB/ladybug), CSR-based adjacency indexing, factorized query processing
 
 ## License
 

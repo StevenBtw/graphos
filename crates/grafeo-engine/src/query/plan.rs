@@ -115,6 +115,10 @@ pub enum LogicalOperator {
     /// Delete RDF triples.
     DeleteTriple(DeleteTripleOp),
 
+    /// SPARQL MODIFY operation (DELETE/INSERT WHERE).
+    /// Evaluates WHERE once, applies DELETE templates, then INSERT templates.
+    Modify(ModifyOp),
+
     /// Clear a graph (remove all triples).
     ClearGraph(ClearGraphOp),
 
@@ -178,6 +182,9 @@ pub struct ExpandOp {
     pub max_hops: Option<u32>,
     /// Input operator.
     pub input: Box<LogicalOperator>,
+    /// Path alias for variable-length patterns (e.g., `p` in `p = (a)-[*1..3]->(b)`).
+    /// When set, a path length column will be output under this name.
+    pub path_alias: Option<String>,
 }
 
 /// Direction for edge expansion.
@@ -241,6 +248,8 @@ pub struct AggregateOp {
     pub aggregates: Vec<AggregateExpr>,
     /// Input operator.
     pub input: Box<LogicalOperator>,
+    /// HAVING clause filter (applied after aggregation).
+    pub having: Option<LogicalExpression>,
 }
 
 /// An aggregate expression.
@@ -254,6 +263,8 @@ pub struct AggregateExpr {
     pub distinct: bool,
     /// Alias for the result.
     pub alias: Option<String>,
+    /// Percentile parameter for PERCENTILE_DISC/PERCENTILE_CONT (0.0 to 1.0).
+    pub percentile: Option<f64>,
 }
 
 /// Aggregate function.
@@ -273,6 +284,14 @@ pub enum AggregateFunction {
     Max,
     /// Collect into list.
     Collect,
+    /// Sample standard deviation (STDEV).
+    StdDev,
+    /// Population standard deviation (STDEVP).
+    StdDevPop,
+    /// Discrete percentile (PERCENTILE_DISC).
+    PercentileDisc,
+    /// Continuous percentile (PERCENTILE_CONT).
+    PercentileCont,
 }
 
 /// Filter rows based on a predicate.
@@ -352,6 +371,9 @@ pub enum SortOrder {
 pub struct DistinctOp {
     /// Input operator.
     pub input: Box<LogicalOperator>,
+    /// Optional columns to use for deduplication.
+    /// If None, all columns are used.
+    pub columns: Option<Vec<String>>,
 }
 
 /// Create a new node.
@@ -389,6 +411,8 @@ pub struct CreateEdgeOp {
 pub struct DeleteNodeOp {
     /// Variable of the node to delete.
     pub variable: String,
+    /// Whether to detach (delete connected edges) before deleting.
+    pub detach: bool,
     /// Input operator.
     pub input: Box<LogicalOperator>,
 }
@@ -592,6 +616,39 @@ pub struct DeleteTripleOp {
     pub input: Option<Box<LogicalOperator>>,
 }
 
+/// SPARQL MODIFY operation (DELETE/INSERT WHERE).
+///
+/// Per SPARQL 1.1 Update spec, this operator:
+/// 1. Evaluates the WHERE clause once to get bindings
+/// 2. Applies DELETE templates using those bindings
+/// 3. Applies INSERT templates using the SAME bindings
+///
+/// This ensures DELETE and INSERT see consistent data.
+#[derive(Debug, Clone)]
+pub struct ModifyOp {
+    /// DELETE triple templates (patterns with variables).
+    pub delete_templates: Vec<TripleTemplate>,
+    /// INSERT triple templates (patterns with variables).
+    pub insert_templates: Vec<TripleTemplate>,
+    /// WHERE clause that provides variable bindings.
+    pub where_clause: Box<LogicalOperator>,
+    /// Named graph context (for WITH clause).
+    pub graph: Option<String>,
+}
+
+/// A triple template for DELETE/INSERT operations.
+#[derive(Debug, Clone)]
+pub struct TripleTemplate {
+    /// Subject (may be a variable).
+    pub subject: TripleComponent,
+    /// Predicate (may be a variable).
+    pub predicate: TripleComponent,
+    /// Object (may be a variable or literal).
+    pub object: TripleComponent,
+    /// Named graph (optional).
+    pub graph: Option<String>,
+}
+
 /// Clear all triples from a graph.
 #[derive(Debug, Clone)]
 pub struct ClearGraphOp {
@@ -724,6 +781,8 @@ pub enum LogicalExpression {
         name: String,
         /// Arguments.
         args: Vec<LogicalExpression>,
+        /// Whether DISTINCT is applied (e.g., COUNT(DISTINCT x)).
+        distinct: bool,
     },
 
     /// List literal.

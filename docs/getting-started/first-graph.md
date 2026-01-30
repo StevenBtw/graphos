@@ -24,7 +24,7 @@ A social network with:
     import grafeo
 
     # Create a persistent database
-    db = grafeo.Database(path="social_network.db")
+    db = grafeo.GrafeoDB(path="social_network.db")
     ```
 
 === "Rust"

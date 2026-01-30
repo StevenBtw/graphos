@@ -17,6 +17,18 @@ class BaseQueriesTest(ABC):
     """
 
     # =========================================================================
+    # EXECUTION
+    # =========================================================================
+
+    def execute_query(self, db, query):
+        """Execute a query using the appropriate language parser.
+
+        Override in subclasses that need a specific parser (e.g., Cypher).
+        Default uses GQL parser via db.execute().
+        """
+        return db.execute(query)
+
+    # =========================================================================
     # SETUP METHODS
     # =========================================================================
 
@@ -203,7 +215,7 @@ class BaseQueriesTest(ABC):
         self.setup_pattern_graph(db)
 
         query = self.match_label_query("Person")
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
         assert len(rows) == 3
 
@@ -212,7 +224,7 @@ class BaseQueriesTest(ABC):
         self.setup_pattern_graph(db)
 
         query = self.match_where_query("Person", "age", ">", 28)
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         names = [
@@ -230,7 +242,7 @@ class BaseQueriesTest(ABC):
         query = self.match_and_query(
             "Person", "city", "=", "NYC", "age", ">", 25
         )
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         names = [
@@ -244,7 +256,7 @@ class BaseQueriesTest(ABC):
         self.setup_pattern_graph(db)
 
         query = self.match_relationship_query("Person", "KNOWS", "Person")
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         assert len(rows) == 3
@@ -256,7 +268,7 @@ class BaseQueriesTest(ABC):
         query = self.match_relationship_with_props_query(
             "Person", "KNOWS", "Person", "since", ">=", 2020
         )
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         assert len(rows) >= 2
@@ -266,7 +278,7 @@ class BaseQueriesTest(ABC):
         self.setup_pattern_graph(db)
 
         query = self.match_multi_hop_query("Person", "KNOWS", "Person")
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         assert len(rows) >= 1
@@ -276,7 +288,7 @@ class BaseQueriesTest(ABC):
         self.setup_pattern_graph(db)
 
         query = self.match_relationship_query("Person", "WORKS_AT", "Company")
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         assert len(rows) == 3
@@ -292,7 +304,7 @@ class BaseQueriesTest(ABC):
         query = self.variable_length_path_query(
             "Node", "name", "a", "NEXT", "Node", 1, 3
         )
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         names = [
@@ -310,7 +322,7 @@ class BaseQueriesTest(ABC):
         query = self.shortest_path_query(
             "Node", "name", "a", "Node", "name", "d"
         )
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         if len(rows) > 0:
@@ -328,7 +340,7 @@ class BaseQueriesTest(ABC):
         query = self.variable_length_path_query(
             "Node", "name", "a", "NEXT", "Node", 2, 2
         )
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         names = [
@@ -348,7 +360,7 @@ class BaseQueriesTest(ABC):
         self.setup_aggregation_data(db)
 
         query = self.count_query("Person")
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         assert len(rows) == 1
@@ -359,7 +371,7 @@ class BaseQueriesTest(ABC):
         self.setup_aggregation_data(db)
 
         query = self.count_distinct_query("Person", "city")
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         assert len(rows) == 1
@@ -371,7 +383,7 @@ class BaseQueriesTest(ABC):
         self.setup_aggregation_data(db)
 
         query = self.sum_avg_query("Person", "age")
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         assert len(rows) == 1
@@ -385,7 +397,7 @@ class BaseQueriesTest(ABC):
         self.setup_aggregation_data(db)
 
         query = self.min_max_query("Person", "age")
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         assert len(rows) == 1
@@ -399,7 +411,7 @@ class BaseQueriesTest(ABC):
         self.setup_aggregation_data(db)
 
         query = self.group_by_query("Person", "city")
-        result = db.execute(query)
+        result = self.execute_query(db, query)
         rows = list(result)
 
         assert len(rows) == 2

@@ -14,6 +14,7 @@ use crate::query::plan::{
 use grafeo_common::types::LogicalType;
 use grafeo_common::types::{EpochId, TxId};
 use grafeo_common::utils::error::{Error, Result};
+use grafeo_core::execution::AdaptiveContext;
 use grafeo_core::execution::operators::{
     AddLabelOperator, AggregateExpr as PhysicalAggregateExpr,
     AggregateFunction as PhysicalAggregateFunction, BinaryFilterOp, CreateEdgeOperator,
@@ -111,7 +112,193 @@ impl Planner {
     /// Returns an error if planning fails.
     pub fn plan(&self, logical_plan: &LogicalPlan) -> Result<PhysicalPlan> {
         let (operator, columns) = self.plan_operator(&logical_plan.root)?;
-        Ok(PhysicalPlan { operator, columns })
+        Ok(PhysicalPlan {
+            operator,
+            columns,
+            adaptive_context: None,
+        })
+    }
+
+    /// Plans a logical plan with adaptive execution support.
+    ///
+    /// Creates cardinality checkpoints at key points in the plan (scans, filters,
+    /// joins) that can be monitored during execution to detect estimate errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if planning fails.
+    pub fn plan_adaptive(&self, logical_plan: &LogicalPlan) -> Result<PhysicalPlan> {
+        let (operator, columns) = self.plan_operator(&logical_plan.root)?;
+
+        // Build adaptive context with cardinality estimates
+        let mut adaptive_context = AdaptiveContext::new();
+        self.collect_cardinality_estimates(&logical_plan.root, &mut adaptive_context, 0);
+
+        Ok(PhysicalPlan {
+            operator,
+            columns,
+            adaptive_context: Some(adaptive_context),
+        })
+    }
+
+    /// Collects cardinality estimates from the logical plan into an adaptive context.
+    fn collect_cardinality_estimates(
+        &self,
+        op: &LogicalOperator,
+        ctx: &mut AdaptiveContext,
+        depth: usize,
+    ) {
+        match op {
+            LogicalOperator::NodeScan(scan) => {
+                // Estimate based on label statistics
+                let estimate = if let Some(label) = &scan.label {
+                    self.store.nodes_by_label(label).len() as f64
+                } else {
+                    self.store.node_count() as f64
+                };
+                let id = format!("scan_{}", scan.variable);
+                ctx.set_estimate(&id, estimate);
+
+                // Recurse into input if present
+                if let Some(input) = &scan.input {
+                    self.collect_cardinality_estimates(input, ctx, depth + 1);
+                }
+            }
+            LogicalOperator::Filter(filter) => {
+                // Default selectivity estimate for filters (30%)
+                let input_estimate = self.estimate_cardinality(&filter.input);
+                let estimate = input_estimate * 0.3;
+                let id = format!("filter_{depth}");
+                ctx.set_estimate(&id, estimate);
+
+                self.collect_cardinality_estimates(&filter.input, ctx, depth + 1);
+            }
+            LogicalOperator::Expand(expand) => {
+                // Estimate based on average degree
+                let input_estimate = self.estimate_cardinality(&expand.input);
+                let avg_degree = 10.0; // Default estimate
+                let estimate = input_estimate * avg_degree;
+                let id = format!("expand_{}", expand.to_variable);
+                ctx.set_estimate(&id, estimate);
+
+                self.collect_cardinality_estimates(&expand.input, ctx, depth + 1);
+            }
+            LogicalOperator::Join(join) => {
+                // Estimate join output (product with selectivity)
+                let left_est = self.estimate_cardinality(&join.left);
+                let right_est = self.estimate_cardinality(&join.right);
+                let estimate = (left_est * right_est).sqrt(); // Geometric mean as rough estimate
+                let id = format!("join_{depth}");
+                ctx.set_estimate(&id, estimate);
+
+                self.collect_cardinality_estimates(&join.left, ctx, depth + 1);
+                self.collect_cardinality_estimates(&join.right, ctx, depth + 1);
+            }
+            LogicalOperator::Aggregate(agg) => {
+                // Aggregates typically reduce cardinality
+                let input_estimate = self.estimate_cardinality(&agg.input);
+                let estimate = if agg.group_by.is_empty() {
+                    1.0 // Scalar aggregate
+                } else {
+                    (input_estimate * 0.1).max(1.0) // 10% of input as group estimate
+                };
+                let id = format!("aggregate_{depth}");
+                ctx.set_estimate(&id, estimate);
+
+                self.collect_cardinality_estimates(&agg.input, ctx, depth + 1);
+            }
+            LogicalOperator::Distinct(distinct) => {
+                let input_estimate = self.estimate_cardinality(&distinct.input);
+                let estimate = (input_estimate * 0.5).max(1.0);
+                let id = format!("distinct_{depth}");
+                ctx.set_estimate(&id, estimate);
+
+                self.collect_cardinality_estimates(&distinct.input, ctx, depth + 1);
+            }
+            LogicalOperator::Return(ret) => {
+                self.collect_cardinality_estimates(&ret.input, ctx, depth + 1);
+            }
+            LogicalOperator::Limit(limit) => {
+                let input_estimate = self.estimate_cardinality(&limit.input);
+                let estimate = (input_estimate).min(limit.count as f64);
+                let id = format!("limit_{depth}");
+                ctx.set_estimate(&id, estimate);
+
+                self.collect_cardinality_estimates(&limit.input, ctx, depth + 1);
+            }
+            LogicalOperator::Skip(skip) => {
+                let input_estimate = self.estimate_cardinality(&skip.input);
+                let estimate = (input_estimate - skip.count as f64).max(0.0);
+                let id = format!("skip_{depth}");
+                ctx.set_estimate(&id, estimate);
+
+                self.collect_cardinality_estimates(&skip.input, ctx, depth + 1);
+            }
+            LogicalOperator::Sort(sort) => {
+                // Sort doesn't change cardinality
+                self.collect_cardinality_estimates(&sort.input, ctx, depth + 1);
+            }
+            LogicalOperator::Union(union) => {
+                let estimate: f64 = union
+                    .inputs
+                    .iter()
+                    .map(|input| self.estimate_cardinality(input))
+                    .sum();
+                let id = format!("union_{depth}");
+                ctx.set_estimate(&id, estimate);
+
+                for input in &union.inputs {
+                    self.collect_cardinality_estimates(input, ctx, depth + 1);
+                }
+            }
+            _ => {
+                // For other operators, try to recurse into known input patterns
+            }
+        }
+    }
+
+    /// Estimates cardinality for a logical operator subtree.
+    fn estimate_cardinality(&self, op: &LogicalOperator) -> f64 {
+        match op {
+            LogicalOperator::NodeScan(scan) => {
+                if let Some(label) = &scan.label {
+                    self.store.nodes_by_label(label).len() as f64
+                } else {
+                    self.store.node_count() as f64
+                }
+            }
+            LogicalOperator::Filter(filter) => self.estimate_cardinality(&filter.input) * 0.3,
+            LogicalOperator::Expand(expand) => self.estimate_cardinality(&expand.input) * 10.0,
+            LogicalOperator::Join(join) => {
+                let left = self.estimate_cardinality(&join.left);
+                let right = self.estimate_cardinality(&join.right);
+                (left * right).sqrt()
+            }
+            LogicalOperator::Aggregate(agg) => {
+                if agg.group_by.is_empty() {
+                    1.0
+                } else {
+                    (self.estimate_cardinality(&agg.input) * 0.1).max(1.0)
+                }
+            }
+            LogicalOperator::Distinct(distinct) => {
+                (self.estimate_cardinality(&distinct.input) * 0.5).max(1.0)
+            }
+            LogicalOperator::Return(ret) => self.estimate_cardinality(&ret.input),
+            LogicalOperator::Limit(limit) => self
+                .estimate_cardinality(&limit.input)
+                .min(limit.count as f64),
+            LogicalOperator::Skip(skip) => {
+                (self.estimate_cardinality(&skip.input) - skip.count as f64).max(0.0)
+            }
+            LogicalOperator::Sort(sort) => self.estimate_cardinality(&sort.input),
+            LogicalOperator::Union(union) => union
+                .inputs
+                .iter()
+                .map(|input| self.estimate_cardinality(input))
+                .sum(),
+            _ => 1000.0, // Default estimate for unknown operators
+        }
     }
 
     /// Plans a single logical operator.
@@ -219,7 +406,7 @@ impl Planner {
         let operator: Box<dyn Operator> = if is_variable_length {
             // Use VariableLengthExpandOperator for multi-hop paths
             let max_hops = expand.max_hops.unwrap_or(expand.min_hops + 10); // Default max if unlimited
-            let expand_op = VariableLengthExpandOperator::new(
+            let mut expand_op = VariableLengthExpandOperator::new(
                 Arc::clone(&self.store),
                 input_op,
                 source_column,
@@ -229,6 +416,12 @@ impl Planner {
                 max_hops,
             )
             .with_tx_context(self.viewing_epoch, self.tx_id);
+
+            // If a path alias is set, enable path length output
+            if expand.path_alias.is_some() {
+                expand_op = expand_op.with_path_length_output();
+            }
+
             Box::new(expand_op)
         } else {
             // Use simple ExpandOperator for single-hop paths
@@ -243,7 +436,7 @@ impl Planner {
             Box::new(expand_op)
         };
 
-        // Build output columns: [input_columns..., edge, target]
+        // Build output columns: [input_columns..., edge, target, (path_length)?]
         // Preserve all input columns and add edge + target to match ExpandOperator output
         let mut columns = input_columns;
 
@@ -256,6 +449,11 @@ impl Planner {
         columns.push(edge_col_name);
 
         columns.push(expand.to_variable.clone());
+
+        // If a path alias is set, add a column for the path length
+        if let Some(ref path_alias) = expand.path_alias {
+            columns.push(format!("_path_length_{}", path_alias));
+        }
 
         Ok((operator, columns))
     }
@@ -320,7 +518,7 @@ impl Planner {
                         projections.push(ProjectExpr::Constant(value.clone()));
                         output_types.push(value_to_logical_type(value));
                     }
-                    LogicalExpression::FunctionCall { name, args } => {
+                    LogicalExpression::FunctionCall { name, args, .. } => {
                         // Handle built-in functions
                         match name.to_lowercase().as_str() {
                             "type" => {
@@ -371,11 +569,14 @@ impl Planner {
                                     ));
                                 }
                             }
+                            // For other functions (head, tail, size, etc.), use expression evaluation
                             _ => {
-                                return Err(Error::Internal(format!(
-                                    "Unsupported function in RETURN: {}",
-                                    name
-                                )));
+                                let filter_expr = self.convert_expression(&item.expression)?;
+                                projections.push(ProjectExpr::Expression {
+                                    expr: filter_expr,
+                                    variable_columns: variable_columns.clone(),
+                                });
+                                output_types.push(LogicalType::Any);
                             }
                         }
                     }
@@ -443,8 +644,17 @@ impl Planner {
         &self,
         project: &crate::query::plan::ProjectOp,
     ) -> Result<(Box<dyn Operator>, Vec<String>)> {
-        // Plan the input operator first
-        let (input_op, input_columns) = self.plan_operator(&project.input)?;
+        // Handle Empty input specially (standalone WITH like: WITH [1,2,3] AS nums)
+        let (input_op, input_columns): (Box<dyn Operator>, Vec<String>) =
+            if matches!(project.input.as_ref(), LogicalOperator::Empty) {
+                // Create a single-row operator for projecting literals
+                let single_row_op: Box<dyn Operator> = Box::new(
+                    grafeo_core::execution::operators::single_row::SingleRowOperator::new(),
+                );
+                (single_row_op, Vec::new())
+            } else {
+                self.plan_operator(&project.input)?
+            };
 
         // Build variable to column index mapping
         let variable_columns: HashMap<String, usize> = input_columns
@@ -784,6 +994,7 @@ impl Planner {
                     column,
                     distinct: agg_expr.distinct,
                     alias: agg_expr.alias.clone(),
+                    percentile: agg_expr.percentile,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -813,6 +1024,11 @@ impl Planner {
                     LogicalType::Int64
                 }
                 LogicalAggregateFunction::Collect => LogicalType::Any, // List type (using Any since List is a complex type)
+                // Statistical functions return Float64
+                LogicalAggregateFunction::StdDev
+                | LogicalAggregateFunction::StdDevPop
+                | LogicalAggregateFunction::PercentileDisc
+                | LogicalAggregateFunction::PercentileCont => LogicalType::Float64,
             };
             output_schema.push(result_type);
             output_columns.push(
@@ -824,7 +1040,7 @@ impl Planner {
         }
 
         // Choose operator based on whether there are group-by columns
-        let operator: Box<dyn Operator> = if group_columns.is_empty() {
+        let mut operator: Box<dyn Operator> = if group_columns.is_empty() {
             Box::new(SimpleAggregateOperator::new(
                 input_op,
                 physical_aggregates,
@@ -838,6 +1054,21 @@ impl Planner {
                 output_schema,
             ))
         };
+
+        // Apply HAVING clause filter if present
+        if let Some(having_expr) = &agg.having {
+            // Build variable to column mapping for the aggregate output
+            let having_var_columns: HashMap<String, usize> = output_columns
+                .iter()
+                .enumerate()
+                .map(|(i, name)| (name.clone(), i))
+                .collect();
+
+            let filter_expr = self.convert_expression(having_expr)?;
+            let predicate =
+                ExpressionPredicate::new(filter_expr, having_var_columns, Arc::clone(&self.store));
+            operator = Box::new(FilterOperator::new(operator, Box::new(predicate)));
+        }
 
         Ok((operator, output_columns))
     }
@@ -922,7 +1153,7 @@ impl Planner {
                     operand: Box::new(operand_expr),
                 })
             }
-            LogicalExpression::FunctionCall { name, args } => {
+            LogicalExpression::FunctionCall { name, args, .. } => {
                 let filter_args: Vec<FilterExpression> = args
                     .iter()
                     .map(|a| self.convert_expression(a))
@@ -1326,7 +1557,7 @@ impl Planner {
                 input_op,
                 node_column,
                 output_schema,
-                true, // detach = true to delete connected edges
+                delete.detach, // DETACH DELETE deletes connected edges first
             )
             .with_tx_context(self.viewing_epoch, self.tx_id),
         );
@@ -1602,17 +1833,21 @@ impl Planner {
         };
 
         // Create the shortest path operator
-        let operator: Box<dyn Operator> = Box::new(ShortestPathOperator::new(
-            Arc::clone(&self.store),
-            input_op,
-            source_column,
-            target_column,
-            sp.edge_type.clone(),
-            direction,
-        ));
+        let operator: Box<dyn Operator> = Box::new(
+            ShortestPathOperator::new(
+                Arc::clone(&self.store),
+                input_op,
+                source_column,
+                target_column,
+                sp.edge_type.clone(),
+                direction,
+            )
+            .with_all_paths(sp.all_paths),
+        );
 
-        // Add path alias to output columns
-        columns.push(sp.path_alias.clone());
+        // Add path length column with the expected naming convention
+        // The translator expects _path_length_{alias} format for length(p) calls
+        columns.push(format!("_path_length_{}", sp.path_alias));
 
         Ok((operator, columns))
     }
@@ -1803,6 +2038,10 @@ pub fn convert_aggregate_function(func: LogicalAggregateFunction) -> PhysicalAgg
         LogicalAggregateFunction::Min => PhysicalAggregateFunction::Min,
         LogicalAggregateFunction::Max => PhysicalAggregateFunction::Max,
         LogicalAggregateFunction::Collect => PhysicalAggregateFunction::Collect,
+        LogicalAggregateFunction::StdDev => PhysicalAggregateFunction::StdDev,
+        LogicalAggregateFunction::StdDevPop => PhysicalAggregateFunction::StdDevPop,
+        LogicalAggregateFunction::PercentileDisc => PhysicalAggregateFunction::PercentileDisc,
+        LogicalAggregateFunction::PercentileCont => PhysicalAggregateFunction::PercentileCont,
     }
 }
 
@@ -1835,7 +2074,7 @@ pub fn convert_filter_expression(expr: &LogicalExpression) -> Result<FilterExpre
                 operand: Box::new(operand_expr),
             })
         }
-        LogicalExpression::FunctionCall { name, args } => {
+        LogicalExpression::FunctionCall { name, args, .. } => {
             let filter_args: Vec<FilterExpression> = args
                 .iter()
                 .map(|a| convert_filter_expression(a))
@@ -1982,6 +2221,12 @@ pub struct PhysicalPlan {
     pub operator: Box<dyn Operator>,
     /// Column names for the result.
     pub columns: Vec<String>,
+    /// Adaptive execution context with cardinality estimates.
+    ///
+    /// When adaptive execution is enabled, this context contains estimated
+    /// cardinalities at various checkpoints in the plan. During execution,
+    /// actual row counts are recorded and compared against estimates.
+    pub adaptive_context: Option<AdaptiveContext>,
 }
 
 impl PhysicalPlan {
@@ -1994,6 +2239,17 @@ impl PhysicalPlan {
     /// Consumes the plan and returns the operator.
     pub fn into_operator(self) -> Box<dyn Operator> {
         self.operator
+    }
+
+    /// Returns the adaptive context, if adaptive execution is enabled.
+    #[must_use]
+    pub fn adaptive_context(&self) -> Option<&AdaptiveContext> {
+        self.adaptive_context.as_ref()
+    }
+
+    /// Takes ownership of the adaptive context.
+    pub fn take_adaptive_context(&mut self) -> Option<AdaptiveContext> {
+        self.adaptive_context.take()
     }
 }
 
@@ -2299,6 +2555,7 @@ mod tests {
                             variable: "n".to_string(),
                             property: "friends".to_string(),
                         }],
+                        distinct: false,
                     }),
                     op: BinaryOp::Gt,
                     right: Box::new(LogicalExpression::Literal(Value::Int64(0))),
@@ -2348,6 +2605,7 @@ mod tests {
                     label: Some("Person".to_string()),
                     input: None,
                 })),
+                path_alias: None,
             })),
         }));
 
@@ -2392,6 +2650,7 @@ mod tests {
                     label: None,
                     input: None,
                 })),
+                path_alias: None,
             })),
         }));
 
@@ -2531,6 +2790,7 @@ mod tests {
                     label: None,
                     input: None,
                 })),
+                columns: None,
             })),
         }));
 
@@ -2559,12 +2819,14 @@ mod tests {
                     expression: Some(LogicalExpression::Variable("n".to_string())),
                     distinct: false,
                     alias: Some("cnt".to_string()),
+                    percentile: None,
                 }],
                 input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                     variable: "n".to_string(),
                     label: None,
                     input: None,
                 })),
+                having: None,
             })),
         }));
 
@@ -2588,12 +2850,14 @@ mod tests {
                 expression: Some(LogicalExpression::Variable("n".to_string())),
                 distinct: false,
                 alias: Some("cnt".to_string()),
+                percentile: None,
             }],
             input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                 variable: "n".to_string(),
                 label: Some("Person".to_string()),
                 input: None,
             })),
+            having: None,
         }));
 
         let physical = planner.plan(&logical).unwrap();
@@ -2616,12 +2880,14 @@ mod tests {
                 }),
                 distinct: false,
                 alias: Some("total".to_string()),
+                percentile: None,
             }],
             input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                 variable: "n".to_string(),
                 label: None,
                 input: None,
             })),
+            having: None,
         }));
 
         let physical = planner.plan(&logical).unwrap();
@@ -2644,12 +2910,14 @@ mod tests {
                 }),
                 distinct: false,
                 alias: Some("average".to_string()),
+                percentile: None,
             }],
             input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                 variable: "n".to_string(),
                 label: None,
                 input: None,
             })),
+            having: None,
         }));
 
         let physical = planner.plan(&logical).unwrap();
@@ -2673,6 +2941,7 @@ mod tests {
                     }),
                     distinct: false,
                     alias: Some("youngest".to_string()),
+                    percentile: None,
                 },
                 LogicalAggregateExpr {
                     function: LogicalAggregateFunction::Max,
@@ -2682,6 +2951,7 @@ mod tests {
                     }),
                     distinct: false,
                     alias: Some("oldest".to_string()),
+                    percentile: None,
                 },
             ],
             input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
@@ -2689,6 +2959,7 @@ mod tests {
                 label: None,
                 input: None,
             })),
+            having: None,
         }));
 
         let physical = planner.plan(&logical).unwrap();
@@ -2851,6 +3122,7 @@ mod tests {
         // MATCH (n) DELETE n
         let logical = LogicalPlan::new(LogicalOperator::DeleteNode(DeleteNodeOp {
             variable: "n".to_string(),
+            detach: false,
             input: Box::new(LogicalOperator::NodeScan(NodeScanOp {
                 variable: "n".to_string(),
                 label: None,

@@ -32,7 +32,7 @@ import grafeo
 print(grafeo.__version__)
 
 # Create a test database
-db = grafeo.Database()
+db = grafeo.GrafeoDB()
 print("Grafeo installed successfully!")
 ```
 
@@ -107,7 +107,7 @@ cargo build --workspace --release
 ### Build Python Package
 
 ```bash
-cd crates/grafeo-python
+cd crates/bindings/python
 uv add maturin
 maturin develop --release
 ```

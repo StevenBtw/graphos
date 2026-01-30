@@ -34,6 +34,7 @@ pub mod bitvec;
 pub mod codec;
 pub mod delta;
 pub mod dictionary;
+pub mod runlength;
 
 // Re-export commonly used types
 pub use bitpack::{BitPackedInts, DeltaBitPacked};
@@ -43,3 +44,4 @@ pub use codec::{
 };
 pub use delta::{DeltaEncoding, zigzag_decode, zigzag_encode};
 pub use dictionary::{DictionaryBuilder, DictionaryEncoding};
+pub use runlength::{Run, RunLengthAnalyzer, RunLengthEncoding, SignedRunLengthEncoding};

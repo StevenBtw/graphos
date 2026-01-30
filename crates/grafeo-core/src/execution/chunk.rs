@@ -27,8 +27,8 @@ pub const DEFAULT_CHUNK_SIZE: usize = 2048;
 /// use grafeo_common::types::Value;
 ///
 /// // Create columns
-/// let names = ValueVector::from(vec![Value::from("Alice"), Value::from("Bob")]);
-/// let ages = ValueVector::from(vec![Value::from(30i64), Value::from(25i64)]);
+/// let names = ValueVector::from_values(&[Value::from("Alice"), Value::from("Bob")]);
+/// let ages = ValueVector::from_values(&[Value::from(30i64), Value::from(25i64)]);
 ///
 /// // Bundle into a chunk
 /// let chunk = DataChunk::new(vec![names, ages]);

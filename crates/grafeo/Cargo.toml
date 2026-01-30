@@ -9,10 +9,10 @@ keywords = ["graph", "database", "gql", "knowledge-graph", "embedded"]
 categories = ["database-implementations", "data-structures"]
 
 [dependencies]
-grafeo-engine = { path = "../grafeo-engine", version = "0.1.1" }
-grafeo-core = { path = "../grafeo-core", version = "0.1.1" }
-grafeo-common = { path = "../grafeo-common", version = "0.1.1" }
-grafeo-adapters = { path = "../grafeo-adapters", version = "0.1.1" }
+grafeo-engine = { path = "../grafeo-engine", version = "0.1.3" }
+grafeo-core = { path = "../grafeo-core", version = "0.1.3" }
+grafeo-common = { path = "../grafeo-common", version = "0.1.3" }
+grafeo-adapters = { path = "../grafeo-adapters", version = "0.1.3" }
 
 [features]
 default = ["gql"]

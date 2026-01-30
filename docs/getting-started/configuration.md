@@ -19,7 +19,7 @@ For temporary data or maximum performance:
     import grafeo
 
     # In-memory database (default)
-    db = grafeo.Database()
+    db = grafeo.GrafeoDB()
     ```
 
 === "Rust"
@@ -43,7 +43,7 @@ For durable storage:
     import grafeo
 
     # Persistent database
-    db = grafeo.Database(path="my_graph.db")
+    db = grafeo.GrafeoDB(path="my_graph.db")
     ```
 
 === "Rust"
@@ -63,7 +63,7 @@ Control the maximum memory usage:
 === "Python"
 
     ```python
-    db = grafeo.Database(
+    db = grafeo.GrafeoDB(
         path="my_graph.db",
         memory_limit=4 * 1024 * 1024 * 1024  # 4 GB
     )
@@ -88,7 +88,7 @@ Configure parallelism:
 === "Python"
 
     ```python
-    db = grafeo.Database(
+    db = grafeo.GrafeoDB(
         path="my_graph.db",
         threads=8
     )
@@ -133,7 +133,7 @@ Grafeo can also be configured via environment variables:
 ### For High-Throughput Workloads
 
 ```python
-db = grafeo.Database(
+db = grafeo.GrafeoDB(
     path="high_throughput.db",
     memory_limit=8 * 1024 * 1024 * 1024,  # 8 GB
     threads=16
@@ -143,7 +143,7 @@ db = grafeo.Database(
 ### For Low-Memory Environments
 
 ```python
-db = grafeo.Database(
+db = grafeo.GrafeoDB(
     path="embedded.db",
     memory_limit=256 * 1024 * 1024,  # 256 MB
     threads=2
@@ -154,7 +154,7 @@ db = grafeo.Database(
 
 ```python
 # Multiple read replicas can be opened read-only
-db = grafeo.Database(
+db = grafeo.GrafeoDB(
     path="replica.db",
     read_only=True
 )

@@ -287,7 +287,7 @@ class TestGQLSpecificPatterns:
         """Test EXISTS in WHERE clause."""
         result = pattern_db.execute(
             "MATCH (p:Person) "
-            "WHERE EXISTS { (p)-[:WORKS_AT]->(:Company) } "
+            "WHERE EXISTS { MATCH (p)-[:WORKS_AT]->(:Company) } "
             "RETURN p.name"
         )
         rows = list(result)

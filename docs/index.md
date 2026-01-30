@@ -81,7 +81,7 @@ hide:
     import grafeo
 
     # Create an in-memory database
-    db = grafeo.Database()
+    db = grafeo.GrafeoDB()
 
     # Create nodes and edges
     with db.session() as session:
@@ -112,14 +112,14 @@ hide:
     ```
 
     ```rust
-    use grafeo::Database;
+    use grafeo::GrafeoDB;
 
-    fn main() -> Result<(), grafeo::Error> {
+    fn main() -> Result<(), grafeo_common::utils::error::Error> {
         // Create an in-memory database
-        let db = Database::open_in_memory()?;
+        let db = GrafeoDB::new_in_memory();
 
         // Create a session and execute queries
-        let session = db.session()?;
+        let mut session = db.session();
 
         session.execute(r#"
             INSERT (:Person {name: 'Alice', age: 30})
@@ -137,8 +137,8 @@ hide:
             RETURN p.name, friend.name
         "#)?;
 
-        for row in result {
-            println!("{} knows {}", row.get("p.name")?, row.get("friend.name")?);
+        for row in result.rows {
+            println!("{:?}", row);
         }
 
         Ok(())

@@ -188,6 +188,42 @@ impl PyGrafeoDB {
         PyQueryBuilder::create(query)
     }
 
+    /// Execute a Cypher query.
+    #[cfg(feature = "cypher")]
+    #[pyo3(signature = (query, params=None))]
+    fn execute_cypher(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+        _py: Python<'_>,
+    ) -> PyResult<PyQueryResult> {
+        let db = self.inner.read();
+
+        let result = if let Some(p) = params {
+            // Convert Python params to Rust HashMap
+            let mut param_map = HashMap::new();
+            for (key, value) in p.iter() {
+                let key_str: String = key.extract()?;
+                let val = PyValue::from_py(&value).map_err(PyGrafeoError::from)?;
+                param_map.insert(key_str, val);
+            }
+            db.execute_cypher_with_params(query, param_map)
+                .map_err(PyGrafeoError::from)?
+        } else {
+            db.execute_cypher(query).map_err(PyGrafeoError::from)?
+        };
+
+        // Extract nodes and edges based on column types
+        let (nodes, edges) = extract_entities(&result, &db);
+
+        Ok(PyQueryResult::new(
+            result.columns,
+            result.rows,
+            nodes,
+            edges,
+        ))
+    }
+
     /// Execute a GQL query asynchronously.
     ///
     /// This method returns a Python awaitable that can be used with asyncio.
@@ -599,6 +635,249 @@ impl PyGrafeoDB {
         })
     }
 
+    // =========================================================================
+    // ADMIN API
+    // =========================================================================
+
+    /// Returns high-level database information.
+    ///
+    /// Returns:
+    ///     dict with keys: mode, node_count, edge_count, is_persistent, path,
+    ///     wal_enabled, version
+    ///
+    /// Example:
+    ///     info = db.info()
+    ///     print(f"Nodes: {info['node_count']}, Edges: {info['edge_count']}")
+    fn info(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let db = self.inner.read();
+        let info = db.info();
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("mode", info.mode.to_string())?;
+        dict.set_item("node_count", info.node_count)?;
+        dict.set_item("edge_count", info.edge_count)?;
+        dict.set_item("is_persistent", info.is_persistent)?;
+        dict.set_item("path", info.path.map(|p| p.to_string_lossy().to_string()))?;
+        dict.set_item("wal_enabled", info.wal_enabled)?;
+        dict.set_item("version", info.version)?;
+
+        Ok(dict.into())
+    }
+
+    /// Returns detailed database statistics.
+    ///
+    /// Returns:
+    ///     dict with keys: node_count, edge_count, label_count, edge_type_count,
+    ///     property_key_count, index_count, memory_bytes, disk_bytes
+    ///
+    /// Example:
+    ///     stats = db.detailed_stats()
+    ///     print(f"Memory: {stats['memory_bytes']} bytes")
+    fn detailed_stats(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let db = self.inner.read();
+        let stats = db.detailed_stats();
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("node_count", stats.node_count)?;
+        dict.set_item("edge_count", stats.edge_count)?;
+        dict.set_item("label_count", stats.label_count)?;
+        dict.set_item("edge_type_count", stats.edge_type_count)?;
+        dict.set_item("property_key_count", stats.property_key_count)?;
+        dict.set_item("index_count", stats.index_count)?;
+        dict.set_item("memory_bytes", stats.memory_bytes)?;
+        dict.set_item("disk_bytes", stats.disk_bytes)?;
+
+        Ok(dict.into())
+    }
+
+    /// Returns schema information (labels, edge types, property keys).
+    ///
+    /// Returns:
+    ///     dict with keys: labels (list of dicts), edge_types (list of dicts),
+    ///     property_keys (list of strings)
+    ///
+    /// Example:
+    ///     schema = db.schema()
+    ///     for label in schema['labels']:
+    ///         print(f"{label['name']}: {label['count']} nodes")
+    fn schema(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let db = self.inner.read();
+        let schema = db.schema();
+
+        let dict = pyo3::types::PyDict::new(py);
+
+        match schema {
+            grafeo_engine::SchemaInfo::Lpg(lpg) => {
+                let labels = pyo3::types::PyList::empty(py);
+                for label in lpg.labels {
+                    let label_dict = pyo3::types::PyDict::new(py);
+                    label_dict.set_item("name", label.name)?;
+                    label_dict.set_item("count", label.count)?;
+                    labels.append(label_dict)?;
+                }
+                dict.set_item("labels", labels)?;
+
+                let edge_types = pyo3::types::PyList::empty(py);
+                for et in lpg.edge_types {
+                    let et_dict = pyo3::types::PyDict::new(py);
+                    et_dict.set_item("name", et.name)?;
+                    et_dict.set_item("count", et.count)?;
+                    edge_types.append(et_dict)?;
+                }
+                dict.set_item("edge_types", edge_types)?;
+
+                dict.set_item("property_keys", lpg.property_keys)?;
+            }
+            grafeo_engine::SchemaInfo::Rdf(rdf) => {
+                let predicates = pyo3::types::PyList::empty(py);
+                for pred in rdf.predicates {
+                    let pred_dict = pyo3::types::PyDict::new(py);
+                    pred_dict.set_item("iri", pred.iri)?;
+                    pred_dict.set_item("count", pred.count)?;
+                    predicates.append(pred_dict)?;
+                }
+                dict.set_item("predicates", predicates)?;
+                dict.set_item("named_graphs", rdf.named_graphs)?;
+                dict.set_item("subject_count", rdf.subject_count)?;
+                dict.set_item("object_count", rdf.object_count)?;
+            }
+        }
+
+        Ok(dict.into())
+    }
+
+    /// Validates database integrity.
+    ///
+    /// Returns:
+    ///     list of error dicts (empty = valid). Each error has keys:
+    ///     code, message, context
+    ///
+    /// Example:
+    ///     errors = db.validate()
+    ///     if not errors:
+    ///         print("Database is valid")
+    fn validate(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let db = self.inner.read();
+        let result = db.validate();
+
+        let errors = pyo3::types::PyList::empty(py);
+        for error in result.errors {
+            let error_dict = pyo3::types::PyDict::new(py);
+            error_dict.set_item("code", error.code)?;
+            error_dict.set_item("message", error.message)?;
+            error_dict.set_item("context", error.context)?;
+            errors.append(error_dict)?;
+        }
+
+        Ok(errors.into())
+    }
+
+    /// Returns WAL (Write-Ahead Log) status.
+    ///
+    /// Returns:
+    ///     dict with keys: enabled, path, size_bytes, record_count,
+    ///     last_checkpoint, current_epoch
+    ///
+    /// Example:
+    ///     wal = db.wal_status()
+    ///     print(f"WAL size: {wal['size_bytes']} bytes")
+    fn wal_status(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let db = self.inner.read();
+        let status = db.wal_status();
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("enabled", status.enabled)?;
+        dict.set_item("path", status.path.map(|p| p.to_string_lossy().to_string()))?;
+        dict.set_item("size_bytes", status.size_bytes)?;
+        dict.set_item("record_count", status.record_count)?;
+        dict.set_item("last_checkpoint", status.last_checkpoint)?;
+        dict.set_item("current_epoch", status.current_epoch)?;
+
+        Ok(dict.into())
+    }
+
+    /// Forces a WAL checkpoint.
+    ///
+    /// Flushes all pending WAL records to the main storage.
+    ///
+    /// Example:
+    ///     db.wal_checkpoint()
+    fn wal_checkpoint(&self) -> PyResult<()> {
+        let db = self.inner.read();
+        db.wal_checkpoint().map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
+    /// Saves the database to a file path.
+    ///
+    /// - If in-memory: creates a new persistent database at path
+    /// - If file-backed: creates a copy at the new path
+    ///
+    /// The original database remains unchanged.
+    ///
+    /// Example:
+    ///     db = GrafeoDB()  # in-memory
+    ///     db.create_node(["Person"], {"name": "Alice"})
+    ///     db.save("./mydb")  # save to file
+    fn save(&self, path: String) -> PyResult<()> {
+        let db = self.inner.read();
+        db.save(path).map_err(PyGrafeoError::from)?;
+        Ok(())
+    }
+
+    /// Creates an in-memory copy of this database.
+    ///
+    /// Returns a new database that is completely independent.
+    /// Changes to the copy do not affect the original.
+    ///
+    /// Example:
+    ///     file_db = GrafeoDB("./production.db")
+    ///     test_db = file_db.to_memory()  # safe copy
+    ///     test_db.create_node(...)  # doesn't affect production
+    fn to_memory(&self) -> PyResult<Self> {
+        let db = self.inner.read();
+        let new_db = db.to_memory().map_err(PyGrafeoError::from)?;
+
+        Ok(Self {
+            inner: Arc::new(RwLock::new(new_db)),
+        })
+    }
+
+    /// Opens a database file and loads it entirely into memory.
+    ///
+    /// The returned database has no connection to the original file.
+    /// Changes will NOT be written back to the file.
+    ///
+    /// Example:
+    ///     db = GrafeoDB.open_in_memory("./mydb")
+    ///     db.create_node(...)  # doesn't affect file
+    #[staticmethod]
+    fn open_in_memory(path: String) -> PyResult<Self> {
+        let db = grafeo_engine::GrafeoDB::open_in_memory(path).map_err(PyGrafeoError::from)?;
+
+        Ok(Self {
+            inner: Arc::new(RwLock::new(db)),
+        })
+    }
+
+    /// Returns true if this database is backed by a file (persistent).
+    ///
+    /// In-memory databases return False.
+    #[getter]
+    fn is_persistent(&self) -> bool {
+        let db = self.inner.read();
+        db.is_persistent()
+    }
+
+    /// Returns the database file path, if persistent.
+    ///
+    /// In-memory databases return None.
+    #[getter]
+    fn path(&self) -> Option<String> {
+        let db = self.inner.read();
+        db.path().map(|p| p.to_string_lossy().to_string())
+    }
+
     /// Close the database.
     fn close(&self) -> PyResult<()> {
         let db = self.inner.read();
@@ -811,6 +1090,165 @@ impl PyTransaction {
             result.rows,
             nodes,
             edges,
+        ))
+    }
+
+    /// Execute a Gremlin query within this transaction.
+    ///
+    /// All queries executed through this method see the same snapshot
+    /// and their changes are isolated until commit.
+    #[cfg(feature = "gremlin")]
+    #[pyo3(signature = (query, params=None))]
+    fn execute_gremlin(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+        _py: Python<'_>,
+    ) -> PyResult<PyQueryResult> {
+        if self.committed || self.rolled_back {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Cannot execute on completed transaction",
+            ));
+        }
+
+        let db = self.db.read();
+        let mut session_guard = self.session.lock();
+        let session = session_guard.as_mut().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("Transaction session not available")
+        })?;
+
+        let result = if let Some(p) = params {
+            // Convert Python params to Rust HashMap
+            let mut param_map = HashMap::new();
+            for (key, value) in p.iter() {
+                let key_str: String = key.extract()?;
+                let val = PyValue::from_py(&value).map_err(PyGrafeoError::from)?;
+                param_map.insert(key_str, val);
+            }
+            session
+                .execute_gremlin_with_params(query, param_map)
+                .map_err(PyGrafeoError::from)?
+        } else {
+            session
+                .execute_gremlin(query)
+                .map_err(PyGrafeoError::from)?
+        };
+
+        // Extract nodes and edges based on column types
+        let (nodes, edges) = extract_entities(&result, &db);
+
+        Ok(PyQueryResult::new(
+            result.columns,
+            result.rows,
+            nodes,
+            edges,
+        ))
+    }
+
+    /// Execute a GraphQL query within this transaction.
+    ///
+    /// All queries executed through this method see the same snapshot
+    /// and their changes are isolated until commit.
+    #[cfg(feature = "graphql")]
+    #[pyo3(signature = (query, params=None))]
+    fn execute_graphql(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+        _py: Python<'_>,
+    ) -> PyResult<PyQueryResult> {
+        if self.committed || self.rolled_back {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Cannot execute on completed transaction",
+            ));
+        }
+
+        let db = self.db.read();
+        let mut session_guard = self.session.lock();
+        let session = session_guard.as_mut().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("Transaction session not available")
+        })?;
+
+        let result = if let Some(p) = params {
+            // Convert Python params to Rust HashMap
+            let mut param_map = HashMap::new();
+            for (key, value) in p.iter() {
+                let key_str: String = key.extract()?;
+                let val = PyValue::from_py(&value).map_err(PyGrafeoError::from)?;
+                param_map.insert(key_str, val);
+            }
+            session
+                .execute_graphql_with_params(query, param_map)
+                .map_err(PyGrafeoError::from)?
+        } else {
+            session
+                .execute_graphql(query)
+                .map_err(PyGrafeoError::from)?
+        };
+
+        // Extract nodes and edges based on column types
+        let (nodes, edges) = extract_entities(&result, &db);
+
+        Ok(PyQueryResult::new(
+            result.columns,
+            result.rows,
+            nodes,
+            edges,
+        ))
+    }
+
+    /// Execute a SPARQL query within this transaction.
+    ///
+    /// SPARQL is the W3C standard query language for RDF data.
+    /// All queries executed through this method see the same snapshot
+    /// and their changes are isolated until commit.
+    ///
+    /// Example:
+    ///     with db.begin_transaction() as tx:
+    ///         tx.execute_sparql("INSERT DATA { <http://ex.org/s> <http://ex.org/p> 'value' }")
+    ///         result = tx.execute_sparql("SELECT ?s ?p ?o WHERE { ?s ?p ?o }")
+    ///         tx.commit()
+    #[cfg(feature = "sparql")]
+    #[pyo3(signature = (query, params=None))]
+    fn execute_sparql(
+        &self,
+        query: &str,
+        params: Option<&Bound<'_, pyo3::types::PyDict>>,
+        _py: Python<'_>,
+    ) -> PyResult<PyQueryResult> {
+        if self.committed || self.rolled_back {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Cannot execute on completed transaction",
+            ));
+        }
+
+        let _db = self.db.read();
+        let mut session_guard = self.session.lock();
+        let session = session_guard.as_mut().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("Transaction session not available")
+        })?;
+
+        let result = if let Some(p) = params {
+            // Convert Python params to Rust HashMap
+            let mut param_map = HashMap::new();
+            for (key, value) in p.iter() {
+                let key_str: String = key.extract()?;
+                let val = PyValue::from_py(&value).map_err(PyGrafeoError::from)?;
+                param_map.insert(key_str, val);
+            }
+            session
+                .execute_sparql_with_params(query, param_map)
+                .map_err(PyGrafeoError::from)?
+        } else {
+            session.execute_sparql(query).map_err(PyGrafeoError::from)?
+        };
+
+        // SPARQL results don't have LPG nodes/edges, so pass empty vectors
+        Ok(PyQueryResult::new(
+            result.columns,
+            result.rows,
+            Vec::new(),
+            Vec::new(),
         ))
     }
 

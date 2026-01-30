@@ -41,6 +41,8 @@ pub struct VariableLengthExpandOperator {
     output_buffer: Vec<OutputRow>,
     /// Whether the operator is exhausted.
     exhausted: bool,
+    /// Whether to output path length as an additional column.
+    output_path_length: bool,
 }
 
 /// A materialized input row.
@@ -67,6 +69,8 @@ struct OutputRow {
     edge_id: EdgeId,
     /// The target node.
     target_id: NodeId,
+    /// The path length (number of edges/hops).
+    path_length: u32,
 }
 
 impl VariableLengthExpandOperator {
@@ -95,7 +99,14 @@ impl VariableLengthExpandOperator {
             current_input_idx: 0,
             output_buffer: Vec::new(),
             exhausted: false,
+            output_path_length: false,
         }
+    }
+
+    /// Enables path length output as an additional column.
+    pub fn with_path_length_output(mut self) -> Self {
+        self.output_path_length = true;
+        self
     }
 
     /// Sets the chunk capacity.
@@ -217,6 +228,7 @@ impl VariableLengthExpandOperator {
                     input_idx,
                     edge_id,
                     target_id: current_node,
+                    path_length: depth,
                 });
             }
 
@@ -275,8 +287,9 @@ impl Operator for VariableLengthExpandOperator {
         // Build output chunk from buffer
         let num_input_cols = input_rows.first().map_or(0, |r| r.columns.len());
 
-        // Schema: [input_columns..., edge, target]
-        let mut schema: Vec<LogicalType> = Vec::with_capacity(num_input_cols + 2);
+        // Schema: [input_columns..., edge, target, (path_length)?]
+        let extra_cols = if self.output_path_length { 3 } else { 2 };
+        let mut schema: Vec<LogicalType> = Vec::with_capacity(num_input_cols + extra_cols);
         if let Some(first_row) = input_rows.first() {
             for col_val in &first_row.columns {
                 let ty = match col_val {
@@ -289,6 +302,9 @@ impl Operator for VariableLengthExpandOperator {
         }
         schema.push(LogicalType::Edge);
         schema.push(LogicalType::Node);
+        if self.output_path_length {
+            schema.push(LogicalType::Int64);
+        }
 
         let mut chunk = DataChunk::with_capacity(&schema, self.chunk_capacity);
 
@@ -318,6 +334,15 @@ impl Operator for VariableLengthExpandOperator {
             // Add target node column
             if let Some(col) = chunk.column_mut(num_input_cols + 1) {
                 col.push_node_id(out_row.target_id);
+            }
+
+            // Add path length column if requested
+            if self.output_path_length {
+                if let Some(col) = chunk.column_mut(num_input_cols + 2) {
+                    col.push_value(grafeo_common::types::Value::Int64(i64::from(
+                        out_row.path_length,
+                    )));
+                }
             }
         }
 

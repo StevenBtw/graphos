@@ -187,6 +187,9 @@ impl Default for ZoneMapEntry {
 /// Incrementally builds a zone map entry as you add values.
 ///
 /// Feed it values one at a time; it tracks min/max/nulls automatically.
+///
+/// By default, Bloom filters are enabled for efficient equality checks.
+/// Use [`without_bloom_filter`](Self::without_bloom_filter) if you don't need them.
 pub struct ZoneMapBuilder {
     min: Option<Value>,
     max: Option<Value>,
@@ -195,9 +198,36 @@ pub struct ZoneMapBuilder {
     bloom_builder: Option<BloomFilterBuilder>,
 }
 
+/// Default expected items for Bloom filter in a chunk.
+const DEFAULT_BLOOM_EXPECTED_ITEMS: usize = 2048;
+
+/// Default false positive rate for Bloom filter (1%).
+const DEFAULT_BLOOM_FALSE_POSITIVE_RATE: f64 = 0.01;
+
 impl ZoneMapBuilder {
-    /// Creates a new zone map builder.
+    /// Creates a new zone map builder with Bloom filter enabled by default.
+    ///
+    /// Uses reasonable defaults:
+    /// - Expected items: 2048 (typical chunk size)
+    /// - False positive rate: 1%
     pub fn new() -> Self {
+        Self {
+            min: None,
+            max: None,
+            null_count: 0,
+            row_count: 0,
+            bloom_builder: Some(BloomFilterBuilder::new(
+                DEFAULT_BLOOM_EXPECTED_ITEMS,
+                DEFAULT_BLOOM_FALSE_POSITIVE_RATE,
+            )),
+        }
+    }
+
+    /// Creates a builder without Bloom filter support.
+    ///
+    /// Use this when you know you won't need equality checks, or when
+    /// memory is constrained and the Bloom filter overhead isn't worth it.
+    pub fn without_bloom_filter() -> Self {
         Self {
             min: None,
             max: None,
@@ -207,7 +237,12 @@ impl ZoneMapBuilder {
         }
     }
 
-    /// Creates a builder with Bloom filter support.
+    /// Creates a builder with custom Bloom filter settings.
+    ///
+    /// # Arguments
+    ///
+    /// * `expected_items` - Expected number of items in the chunk
+    /// * `false_positive_rate` - Desired false positive rate (e.g., 0.01 for 1%)
     pub fn with_bloom_filter(expected_items: usize, false_positive_rate: f64) -> Self {
         Self {
             min: None,

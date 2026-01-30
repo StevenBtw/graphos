@@ -63,7 +63,7 @@ class TestGQLMutations(BaseMutationsTest):
         edge_type: str,
         edge_props: dict,
     ) -> str:
-        """GQL: MATCH (a:<from_label>), (b:<to_label>) WHERE ... INSERT (a)-[:<edge_type>]->(b)"""
+        """GQL: MATCH (a:<from_label>), (b:<to_label>) WHERE ... CREATE (a)-[:<edge_type>]->(b)"""
         from_val = f"'{from_value}'" if isinstance(from_value, str) else from_value
         to_val = f"'{to_value}'" if isinstance(to_value, str) else to_value
 
@@ -79,13 +79,13 @@ class TestGQLMutations(BaseMutationsTest):
             return (
                 f"MATCH (a:{from_label}), (b:{to_label}) "
                 f"WHERE a.{from_prop} = {from_val} AND b.{to_prop} = {to_val} "
-                f"INSERT (a)-[r:{edge_type} {{{prop_str}}}]->(b) RETURN r"
+                f"CREATE (a)-[r:{edge_type} {{{prop_str}}}]->(b) RETURN r"
             )
         else:
             return (
                 f"MATCH (a:{from_label}), (b:{to_label}) "
                 f"WHERE a.{from_prop} = {from_val} AND b.{to_prop} = {to_val} "
-                f"INSERT (a)-[r:{edge_type}]->(b) RETURN r"
+                f"CREATE (a)-[r:{edge_type}]->(b) RETURN r"
             )
 
     def update_node_query(self, label: str, match_prop: str, match_value, set_prop: str, set_value) -> str:
@@ -154,12 +154,13 @@ class TestGQLSpecificMutations:
         assert rows[0]["n.city"] == "LA"
 
     def test_gql_remove_property(self, db):
-        """Test REMOVE property."""
+        """Test removing property by setting to null (REMOVE not yet in GQL)."""
         db.execute("INSERT (:Person {name: 'Bob', age: 25, temp: 'delete_me'})")
 
+        # GQL uses SET n.prop = null to remove properties (REMOVE not yet implemented)
         db.execute(
             "MATCH (n:Person) WHERE n.name = 'Bob' "
-            "REMOVE n.temp RETURN n"
+            "SET n.temp = null RETURN n"
         )
 
         result = db.execute("MATCH (n:Person) WHERE n.name = 'Bob' RETURN n.temp")

@@ -31,7 +31,8 @@ For detailed architecture documentation, see [.claude/ARCHITECTURE.md](.claude/A
 | `grafeo-core`     | LPG storage, indexes, execution engine         |
 | `grafeo-adapters` | GQL parser, storage backends, plugins          |
 | `grafeo-engine`   | Database facade, sessions, transactions        |
-| `grafeo-python`   | Python bindings via PyO3                       |
+| `grafeo-python`   | Python bindings via PyO3 (`crates/bindings/python`) |
+| `grafeo-cli`      | Command-line interface for admin operations    |
 
 ### Query Language Architecture
 
@@ -63,10 +64,6 @@ Query String → Parser → AST → Translator → LogicalPlan → Optimizer →
 | Gremlin | ✅ | — | Feature-gated, Apache TinkerPop traversal language |
 | GraphQL | ✅ | ✅ | Feature-gated, schema-driven, maps to both models |
 | SPARQL | — | ✅ | Feature-gated, W3C standard for RDF queries |
-
-### Implementation Plan
-
-See [.claude/IMPLEMENTATION_PLAN.md](.claude/IMPLEMENTATION_PLAN.md) for the detailed implementation and test plan.
 
 ## Coding Standards
 
@@ -127,7 +124,7 @@ cargo bench -p grafeo-common arena
 ## Building Python Bindings
 
 ```bash
-cd crates/grafeo-python
+cd crates/bindings/python
 
 # Development build
 maturin develop

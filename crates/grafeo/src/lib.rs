@@ -25,7 +25,7 @@
 //!
 //! // Create an in-memory database
 //! let db = GrafeoDB::new_in_memory();
-//! let session = db.session();
+//! let mut session = db.session();
 //!
 //! // Add a person
 //! session.execute("INSERT (:Person {name: 'Alice', age: 30})")?;

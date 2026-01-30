@@ -397,6 +397,17 @@ impl Binder {
                         is_edge: false,
                     },
                 );
+                // Also add the path length variable for length(p) calls
+                let path_length_var = format!("_path_length_{}", sp.path_alias);
+                self.context.add_variable(
+                    path_length_var.clone(),
+                    VariableInfo {
+                        name: path_length_var,
+                        data_type: LogicalType::Int64,
+                        is_node: false,
+                        is_edge: false,
+                    },
+                );
                 Ok(())
             }
             // SPARQL Update operators - these don't require variable binding
@@ -410,6 +421,10 @@ impl Binder {
                 if let Some(ref input) = delete.input {
                     self.bind_operator(input)?;
                 }
+                Ok(())
+            }
+            LogicalOperator::Modify(modify) => {
+                self.bind_operator(&modify.where_clause)?;
                 Ok(())
             }
             LogicalOperator::ClearGraph(_)
@@ -558,6 +573,20 @@ impl Binder {
                 is_edge: false,
             },
         );
+
+        // Add path length variable for variable-length paths (for length(p) calls)
+        if let Some(ref path_alias) = expand.path_alias {
+            let path_length_var = format!("_path_length_{}", path_alias);
+            self.context.add_variable(
+                path_length_var.clone(),
+                VariableInfo {
+                    name: path_length_var,
+                    data_type: LogicalType::Int64,
+                    is_node: false,
+                    is_edge: false,
+                },
+            );
+        }
 
         Ok(())
     }
@@ -941,6 +970,7 @@ mod tests {
                     label: Some("Person".to_string()),
                     input: None,
                 })),
+                path_alias: None,
             })),
         }));
 

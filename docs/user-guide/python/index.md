@@ -13,7 +13,7 @@ Grafeo provides first-class Python support through the `grafeo` package.
 import grafeo
 
 # Create a database
-db = grafeo.Database()
+db = grafeo.GrafeoDB()
 
 # Execute queries
 with db.session() as session:

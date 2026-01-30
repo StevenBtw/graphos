@@ -408,13 +408,18 @@ impl<'a> Parser<'a> {
 
     fn parse_pattern(&mut self) -> Result<Pattern> {
         // Check for named path: p = (...)
-        if self.current.kind == TokenKind::Identifier && self.peek_kind() == TokenKind::Eq {
+        // Allow contextual keywords to be used as path variable names
+        if self.can_be_identifier() && self.peek_kind() == TokenKind::Eq {
             let name = self.expect_identifier()?;
             self.expect(TokenKind::Eq)?;
-            let pattern = self.parse_pattern()?;
+
+            // Check for path function: shortestPath(...) or allShortestPaths(...)
+            let (path_function, inner_pattern) = self.parse_path_function_or_pattern()?;
+
             return Ok(Pattern::NamedPath {
                 name,
-                pattern: Box::new(pattern),
+                path_function,
+                pattern: Box::new(inner_pattern),
             });
         }
 
@@ -442,11 +447,64 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse an optional path function followed by a pattern.
+    /// Handles: `shortestPath(pattern)`, `allShortestPaths(pattern)`, or just `pattern`
+    fn parse_path_function_or_pattern(&mut self) -> Result<(Option<PathFunction>, Pattern)> {
+        // Check for path function: shortestPath or allShortestPaths
+        if self.can_be_identifier() {
+            let func_name = self.get_identifier_text().to_lowercase();
+            if func_name == "shortestpath" {
+                self.advance();
+                self.expect(TokenKind::LParen)?;
+                let pattern = self.parse_inner_pattern()?;
+                self.expect(TokenKind::RParen)?;
+                return Ok((Some(PathFunction::ShortestPath), pattern));
+            } else if func_name == "allshortestpaths" {
+                self.advance();
+                self.expect(TokenKind::LParen)?;
+                let pattern = self.parse_inner_pattern()?;
+                self.expect(TokenKind::RParen)?;
+                return Ok((Some(PathFunction::AllShortestPaths), pattern));
+            }
+        }
+
+        // No path function, just parse the pattern
+        let pattern = self.parse_inner_pattern()?;
+        Ok((None, pattern))
+    }
+
+    /// Parse a pattern without checking for named paths (to avoid recursion).
+    fn parse_inner_pattern(&mut self) -> Result<Pattern> {
+        let start = self.parse_node_pattern()?;
+
+        // Check for path continuation
+        if matches!(
+            self.current.kind,
+            TokenKind::Arrow | TokenKind::LeftArrow | TokenKind::Minus
+        ) {
+            let mut chain = Vec::new();
+            while matches!(
+                self.current.kind,
+                TokenKind::Arrow | TokenKind::LeftArrow | TokenKind::Minus
+            ) {
+                chain.push(self.parse_relationship_pattern()?);
+            }
+            Ok(Pattern::Path(PathPattern {
+                start,
+                chain,
+                span: None,
+            }))
+        } else {
+            Ok(Pattern::Node(start))
+        }
+    }
+
     fn parse_node_pattern(&mut self) -> Result<NodePattern> {
         self.expect(TokenKind::LParen)?;
 
-        let variable = if self.current.kind == TokenKind::Identifier {
-            let name = self.current.text.clone();
+        // Variable can be an identifier or a contextual keyword like 'end'
+        let variable = if self.can_be_identifier() && self.current.kind != TokenKind::Colon {
+            let name = self.get_identifier_text();
             self.advance();
             Some(name)
         } else {
@@ -517,12 +575,21 @@ impl<'a> Parser<'a> {
                     self.advance();
                 }
 
-                let var = if self.current.kind == TokenKind::Identifier
-                    && self.peek_kind() != TokenKind::Colon
-                {
-                    let name = self.current.text.clone();
-                    self.advance();
-                    Some(name)
+                // Parse optional variable name - could be followed by : for type
+                // Allow contextual keywords like 'end' to be used as variable names
+                let var = if self.can_be_identifier() {
+                    // Check if this is a variable (followed by : or ] or { or *)
+                    let is_variable = self.peek_kind() == TokenKind::Colon
+                        || self.peek_kind() == TokenKind::RBracket
+                        || self.peek_kind() == TokenKind::LBrace
+                        || self.peek_kind() == TokenKind::Star;
+                    if is_variable {
+                        let name = self.get_identifier_text();
+                        self.advance();
+                        Some(name)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 };
@@ -921,8 +988,8 @@ impl<'a> Parser<'a> {
                 let name = self.expect_identifier()?;
                 Ok(Expression::Parameter(name))
             }
-            TokenKind::Identifier => {
-                let name = self.current.text.clone();
+            _ if self.can_be_identifier() => {
+                let name = self.get_identifier_text();
                 self.advance();
 
                 // Check if function call
@@ -1088,18 +1155,47 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_identifier(&mut self) -> Result<String> {
-        match self.current.kind {
-            TokenKind::Identifier | TokenKind::QuotedIdentifier => {
-                let mut text = self.current.text.clone();
-                // Remove backticks from quoted identifier
-                if self.current.kind == TokenKind::QuotedIdentifier {
-                    text = text[1..text.len() - 1].to_string();
-                }
-                self.advance();
-                Ok(text)
-            }
-            _ => Err(self.error("Expected identifier")),
+        if self.can_be_identifier() {
+            let text = self.get_identifier_text();
+            self.advance();
+            Ok(text)
+        } else {
+            Err(self.error("Expected identifier"))
         }
+    }
+
+    /// Check if the current token can be used as an identifier.
+    /// This includes true identifiers and contextual keywords that can be used as names.
+    fn can_be_identifier(&self) -> bool {
+        matches!(
+            self.current.kind,
+            TokenKind::Identifier
+                | TokenKind::QuotedIdentifier
+                // Contextual keywords that can be used as identifiers
+                | TokenKind::End
+                | TokenKind::Count
+                | TokenKind::Starts
+                | TokenKind::Ends
+                | TokenKind::Contains
+                | TokenKind::All
+                | TokenKind::Asc
+                | TokenKind::Desc
+                | TokenKind::Ascending
+                | TokenKind::Descending
+                | TokenKind::On
+                | TokenKind::Call
+                | TokenKind::Yield
+        )
+    }
+
+    /// Get the text of the current token as an identifier.
+    fn get_identifier_text(&self) -> String {
+        let mut text = self.current.text.clone();
+        // Remove backticks from quoted identifier
+        if self.current.kind == TokenKind::QuotedIdentifier {
+            text = text[1..text.len() - 1].to_string();
+        }
+        text
     }
 
     fn peek_kind(&mut self) -> TokenKind {

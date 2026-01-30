@@ -179,6 +179,7 @@ impl GqlTranslator {
             for variable in &delete_clause.variables {
                 plan = LogicalOperator::DeleteNode(DeleteNodeOp {
                     variable: variable.clone(),
+                    detach: delete_clause.detach,
                     input: Box::new(plan),
                 });
             }
@@ -215,6 +216,7 @@ impl GqlTranslator {
             if with_clause.distinct {
                 plan = LogicalOperator::Distinct(DistinctOp {
                     input: Box::new(plan),
+                    columns: None,
                 });
             }
         }
@@ -251,12 +253,20 @@ impl GqlTranslator {
             let (aggregates, group_by) =
                 self.extract_aggregates_and_groups(&query.return_clause.items)?;
 
+            // Translate HAVING clause if present
+            let having = if let Some(having_clause) = &query.having_clause {
+                Some(self.translate_expression(&having_clause.expression)?)
+            } else {
+                None
+            };
+
             // Insert Aggregate operator - this is the final operator for aggregate queries
             // The aggregate operator produces the output columns directly
             plan = LogicalOperator::Aggregate(AggregateOp {
                 group_by,
                 aggregates,
                 input: Box::new(plan),
+                having,
             });
 
             // Apply ORDER BY for aggregate queries
@@ -376,12 +386,11 @@ impl GqlTranslator {
                     plan.take(),
                 )?);
             } else {
-                let pattern_plan = self.translate_pattern(&aliased_pattern.pattern, plan.take())?;
-                // If there's an alias, register it as a path variable
-                if let Some(alias) = &aliased_pattern.alias {
-                    // For now, path aliases are registered but need special handling for length()
-                    self.register_path_alias(alias, &aliased_pattern.pattern);
-                }
+                let pattern_plan = self.translate_pattern_with_alias(
+                    &aliased_pattern.pattern,
+                    plan.take(),
+                    aliased_pattern.alias.as_deref(),
+                )?;
                 plan = Some(pattern_plan);
             }
         }
@@ -398,18 +407,10 @@ impl GqlTranslator {
         input: Option<LogicalOperator>,
     ) -> Result<LogicalOperator> {
         // Extract source and target from the pattern
-        let (source_var, target_var, edge_type, direction) = match pattern {
+        let (source_node, target_node, edge_type, direction) = match pattern {
             ast::Pattern::Path(path) => {
-                let source_var = path
-                    .source
-                    .variable
-                    .clone()
-                    .unwrap_or_else(|| format!("_anon_{}", rand_id()));
-                let target_var = if let Some(edge) = path.edges.last() {
-                    edge.target
-                        .variable
-                        .clone()
-                        .unwrap_or_else(|| format!("_anon_{}", rand_id()))
+                let target_node = if let Some(edge) = path.edges.last() {
+                    &edge.target
                 } else {
                     return Err(Error::Internal(
                         "shortestPath requires a path pattern".to_string(),
@@ -425,7 +426,7 @@ impl GqlTranslator {
                         ast::EdgeDirection::Undirected => ExpandDirection::Both,
                     })
                     .unwrap_or(ExpandDirection::Both);
-                (source_var, target_var, edge_type, direction)
+                (&path.source, target_node, edge_type, direction)
             }
             ast::Pattern::Node(_) => {
                 return Err(Error::Internal(
@@ -434,12 +435,28 @@ impl GqlTranslator {
             }
         };
 
-        // First translate the source and target node scans
-        let base_plan = self.translate_pattern(pattern, input)?;
+        // Get variable names
+        let source_var = source_node
+            .variable
+            .clone()
+            .unwrap_or_else(|| format!("_anon_{}", rand_id()));
+        let target_var = target_node
+            .variable
+            .clone()
+            .unwrap_or_else(|| format!("_anon_{}", rand_id()));
+
+        // For shortestPath, we need to scan source and target nodes separately
+        // (not expand between them - the ShortestPathOperator will find the path)
+
+        // Scan source node first
+        let source_plan = self.translate_node_pattern(source_node, input)?;
+
+        // Scan target node (cross-product with source)
+        let target_plan = self.translate_node_pattern(target_node, Some(source_plan))?;
 
         // Wrap with ShortestPath operator
         Ok(LogicalOperator::ShortestPath(ShortestPathOp {
-            input: Box::new(base_plan),
+            input: Box::new(target_plan),
             source_var,
             target_var,
             edge_type,
@@ -449,20 +466,26 @@ impl GqlTranslator {
         }))
     }
 
-    /// Register a path alias for later resolution (e.g., for length(p)).
-    fn register_path_alias(&self, _alias: &str, _pattern: &ast::Pattern) {
-        // This is a placeholder - path alias tracking would be implemented here
-        // For now, we just ignore path aliases without shortestPath
-    }
-
+    #[allow(dead_code)]
     fn translate_pattern(
         &self,
         pattern: &ast::Pattern,
         input: Option<LogicalOperator>,
     ) -> Result<LogicalOperator> {
+        self.translate_pattern_with_alias(pattern, input, None)
+    }
+
+    fn translate_pattern_with_alias(
+        &self,
+        pattern: &ast::Pattern,
+        input: Option<LogicalOperator>,
+        path_alias: Option<&str>,
+    ) -> Result<LogicalOperator> {
         match pattern {
             ast::Pattern::Node(node) => self.translate_node_pattern(node, input),
-            ast::Pattern::Path(path) => self.translate_path_pattern(path, input),
+            ast::Pattern::Path(path) => {
+                self.translate_path_pattern_with_alias(path, input, path_alias)
+            }
         }
     }
 
@@ -645,10 +668,20 @@ impl GqlTranslator {
         Ok(result)
     }
 
+    #[allow(dead_code)]
     fn translate_path_pattern(
         &self,
         path: &ast::PathPattern,
         input: Option<LogicalOperator>,
+    ) -> Result<LogicalOperator> {
+        self.translate_path_pattern_with_alias(path, input, None)
+    }
+
+    fn translate_path_pattern_with_alias(
+        &self,
+        path: &ast::PathPattern,
+        input: Option<LogicalOperator>,
+        path_alias: Option<&str>,
     ) -> Result<LogicalOperator> {
         // Start with the source node
         let source_var = path
@@ -676,8 +709,9 @@ impl GqlTranslator {
 
         // Process each edge in the chain
         let mut current_source = source_var;
+        let edge_count = path.edges.len();
 
-        for edge in &path.edges {
+        for (idx, edge) in path.edges.iter().enumerate() {
             let target_var = edge
                 .target
                 .variable
@@ -695,6 +729,16 @@ impl GqlTranslator {
 
             let edge_var_for_filter = edge_var.clone();
 
+            // Only set path_alias on the last edge of a variable-length path
+            let is_variable_length = edge.min_hops.unwrap_or(1) != 1
+                || edge.max_hops.is_none()
+                || edge.max_hops.map_or(false, |m| m != 1);
+            let expand_path_alias = if is_variable_length && idx == edge_count - 1 {
+                path_alias.map(String::from)
+            } else {
+                None
+            };
+
             plan = LogicalOperator::Expand(ExpandOp {
                 from_variable: current_source,
                 to_variable: target_var.clone(),
@@ -704,6 +748,7 @@ impl GqlTranslator {
                 min_hops: edge.min_hops.unwrap_or(1),
                 max_hops: edge.max_hops.or(Some(1)),
                 input: Box::new(plan),
+                path_alias: expand_path_alias,
             });
 
             // Add filter for edge properties
@@ -769,6 +814,7 @@ impl GqlTranslator {
         // Delete the first variable
         let mut plan = LogicalOperator::DeleteNode(DeleteNodeOp {
             variable: first_var.clone(),
+            detach: delete.detach,
             input: Box::new(scan),
         });
 
@@ -776,6 +822,7 @@ impl GqlTranslator {
         for var in delete.variables.iter().skip(1) {
             plan = LogicalOperator::DeleteNode(DeleteNodeOp {
                 variable: var.clone(),
+                detach: delete.detach,
                 input: Box::new(plan),
             });
         }
@@ -904,15 +951,28 @@ impl GqlTranslator {
                 args,
                 distinct,
             } => {
+                // Special handling for length() on path variables
+                // When length(p) is called where p is a path alias, we convert it
+                // to a variable reference to the path length column
+                if name.to_lowercase() == "length" && args.len() == 1 {
+                    if let ast::Expression::Variable(var_name) = &args[0] {
+                        // Check if this looks like a path variable
+                        // Path lengths are stored in columns named _path_length_{alias}
+                        return Ok(LogicalExpression::Variable(format!(
+                            "_path_length_{}",
+                            var_name
+                        )));
+                    }
+                }
+
                 let args = args
                     .iter()
                     .map(|a| self.translate_expression(a))
                     .collect::<Result<Vec<_>>>()?;
-                // TODO: Pass distinct flag to aggregate expressions when needed
-                let _ = distinct; // Currently handled separately in aggregate translation
                 Ok(LogicalExpression::FunctionCall {
                     name: name.clone(),
                     args,
+                    distinct: *distinct,
                 })
             }
             ast::Expression::List(items) => {
@@ -992,6 +1052,9 @@ impl GqlTranslator {
             ast::BinaryOp::Concat => BinaryOp::Concat,
             ast::BinaryOp::Like => BinaryOp::Like,
             ast::BinaryOp::In => BinaryOp::In,
+            ast::BinaryOp::StartsWith => BinaryOp::StartsWith,
+            ast::BinaryOp::EndsWith => BinaryOp::EndsWith,
+            ast::BinaryOp::Contains => BinaryOp::Contains,
         }
     }
 
@@ -1077,6 +1140,7 @@ impl GqlTranslator {
                             expression: None,
                             distinct: *distinct,
                             alias: alias.clone(),
+                            percentile: None,
                         }
                     } else {
                         // COUNT(x), SUM(x), etc.
@@ -1086,11 +1150,31 @@ impl GqlTranslator {
                         } else {
                             func
                         };
+                        // Extract percentile parameter for percentile functions
+                        let percentile = if matches!(
+                            actual_func,
+                            AggregateFunction::PercentileDisc | AggregateFunction::PercentileCont
+                        ) && args.len() >= 2
+                        {
+                            // Second argument is the percentile value
+                            if let ast::Expression::Literal(ast::Literal::Float(p)) = &args[1] {
+                                Some((*p).clamp(0.0, 1.0))
+                            } else if let ast::Expression::Literal(ast::Literal::Integer(p)) =
+                                &args[1]
+                            {
+                                Some((*p as f64).clamp(0.0, 1.0))
+                            } else {
+                                Some(0.5) // Default to median
+                            }
+                        } else {
+                            None
+                        };
                         AggregateExpr {
                             function: actual_func,
                             expression: Some(self.translate_expression(&args[0])?),
                             distinct: *distinct,
                             alias: alias.clone(),
+                            percentile,
                         }
                     };
                     Ok(Some(agg_expr))
@@ -1114,7 +1198,20 @@ fn rand_id() -> u32 {
 fn is_aggregate_function(name: &str) -> bool {
     matches!(
         name.to_uppercase().as_str(),
-        "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "COLLECT"
+        "COUNT"
+            | "SUM"
+            | "AVG"
+            | "MIN"
+            | "MAX"
+            | "COLLECT"
+            | "STDEV"
+            | "STDDEV"
+            | "STDEVP"
+            | "STDDEVP"
+            | "PERCENTILE_DISC"
+            | "PERCENTILEDISC"
+            | "PERCENTILE_CONT"
+            | "PERCENTILECONT"
     )
 }
 
@@ -1127,6 +1224,10 @@ fn to_aggregate_function(name: &str) -> Option<AggregateFunction> {
         "MIN" => Some(AggregateFunction::Min),
         "MAX" => Some(AggregateFunction::Max),
         "COLLECT" => Some(AggregateFunction::Collect),
+        "STDEV" | "STDDEV" => Some(AggregateFunction::StdDev),
+        "STDEVP" | "STDDEVP" => Some(AggregateFunction::StdDevPop),
+        "PERCENTILE_DISC" | "PERCENTILEDISC" => Some(AggregateFunction::PercentileDisc),
+        "PERCENTILE_CONT" | "PERCENTILECONT" => Some(AggregateFunction::PercentileCont),
         _ => None,
     }
 }

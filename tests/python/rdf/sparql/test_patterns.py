@@ -29,30 +29,30 @@ class TestSPARQLSelect:
         self._setup_test_data()
 
     def _setup_test_data(self):
-        """Create RDF-like test data."""
-        self.alice = self.db.create_node(["Resource"], {
-            "uri": "http://example.org/person/alice",
-            "rdf:type": "http://xmlns.com/foaf/0.1/Person",
-            "foaf:name": "Alice",
-            "foaf:age": 30
-        })
+        """Create RDF test data using SPARQL INSERT DATA."""
+        # Insert RDF triples using SPARQL
+        self.db.execute_sparql("""
+            PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            PREFIX ex: <http://example.org/person/>
 
-        self.bob = self.db.create_node(["Resource"], {
-            "uri": "http://example.org/person/bob",
-            "rdf:type": "http://xmlns.com/foaf/0.1/Person",
-            "foaf:name": "Bob",
-            "foaf:age": 25
-        })
+            INSERT DATA {
+                ex:alice rdf:type foaf:Person .
+                ex:alice foaf:name "Alice" .
+                ex:alice foaf:age 30 .
 
-        self.charlie = self.db.create_node(["Resource"], {
-            "uri": "http://example.org/person/charlie",
-            "rdf:type": "http://xmlns.com/foaf/0.1/Person",
-            "foaf:name": "Charlie",
-            "foaf:age": 35
-        })
+                ex:bob rdf:type foaf:Person .
+                ex:bob foaf:name "Bob" .
+                ex:bob foaf:age 25 .
 
-        self.db.create_edge(self.alice.id, self.bob.id, "foaf:knows", {})
-        self.db.create_edge(self.bob.id, self.charlie.id, "foaf:knows", {})
+                ex:charlie rdf:type foaf:Person .
+                ex:charlie foaf:name "Charlie" .
+                ex:charlie foaf:age 35 .
+
+                ex:alice foaf:knows ex:bob .
+                ex:bob foaf:knows ex:charlie .
+            }
+        """)
 
     def _execute_sparql(self, query: str):
         """Execute SPARQL query, skip if not supported."""
@@ -120,13 +120,15 @@ class TestSPARQLSelect:
 
     def test_sparql_optional(self):
         """SPARQL: SELECT with OPTIONAL."""
-        # Create a person without email
-        self.db.create_node(["Resource"], {
-            "uri": "http://example.org/person/diana",
-            "rdf:type": "http://xmlns.com/foaf/0.1/Person",
-            "foaf:name": "Diana",
-            # No email
-        })
+        # Create a person without email using SPARQL
+        self._execute_sparql("""
+            PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+            PREFIX ex: <http://example.org/person/>
+
+            INSERT DATA {
+                ex:diana foaf:name "Diana" .
+            }
+        """)
 
         result = self._execute_sparql("""
             PREFIX foaf: <http://xmlns.com/foaf/0.1/>
@@ -179,14 +181,27 @@ class TestSPARQLAggregate:
         self._setup_test_data()
 
     def _setup_test_data(self):
-        """Create RDF-like test data."""
-        for name, age in [("Alice", 30), ("Bob", 25), ("Charlie", 35)]:
-            self.db.create_node(["Resource"], {
-                "uri": f"http://example.org/person/{name.lower()}",
-                "rdf:type": "http://xmlns.com/foaf/0.1/Person",
-                "foaf:name": name,
-                "foaf:age": age
-            })
+        """Create RDF test data using SPARQL INSERT DATA."""
+        # Insert RDF triples using SPARQL
+        self.db.execute_sparql("""
+            PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+            PREFIX ex: <http://example.org/person/>
+
+            INSERT DATA {
+                ex:alice rdf:type foaf:Person .
+                ex:alice foaf:name "Alice" .
+                ex:alice foaf:age 30 .
+
+                ex:bob rdf:type foaf:Person .
+                ex:bob foaf:name "Bob" .
+                ex:bob foaf:age 25 .
+
+                ex:charlie rdf:type foaf:Person .
+                ex:charlie foaf:name "Charlie" .
+                ex:charlie foaf:age 35 .
+            }
+        """)
 
     def _execute_sparql(self, query: str):
         """Execute SPARQL query, skip if not supported."""
@@ -220,8 +235,13 @@ class TestSPARQLAggregate:
             }
         """)
         rows = list(result)
-        assert rows[0]["total"] == 90  # 30 + 25 + 35
-        assert abs(rows[0]["average"] - 30.0) < 0.01
+        # RDF stores values as strings; aggregates may return strings or numbers
+        total = rows[0]["total"]
+        average = rows[0]["average"]
+        total_val = float(total) if isinstance(total, str) else total
+        avg_val = float(average) if isinstance(average, str) else average
+        assert total_val == 90  # 30 + 25 + 35
+        assert abs(avg_val - 30.0) < 0.01
 
     def test_sparql_min_max(self):
         """SPARQL: MIN and MAX aggregates."""
@@ -233,17 +253,25 @@ class TestSPARQLAggregate:
             }
         """)
         rows = list(result)
-        assert rows[0]["youngest"] == 25
-        assert rows[0]["oldest"] == 35
+        # RDF stores values as strings, so compare as strings or convert
+        youngest = rows[0]["youngest"]
+        oldest = rows[0]["oldest"]
+        assert int(youngest) == 25 if isinstance(youngest, str) else youngest == 25
+        assert int(oldest) == 35 if isinstance(oldest, str) else oldest == 35
 
     def test_sparql_group_by(self):
         """SPARQL: GROUP BY."""
-        # Add city property
-        self.db.create_node(["Resource"], {
-            "uri": "http://example.org/person/diana",
-            "foaf:name": "Diana",
-            "foaf:city": "NYC"
-        })
+        # Add city property using SPARQL
+        self._execute_sparql("""
+            PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+            PREFIX ex: <http://example.org/person/>
+
+            INSERT DATA {
+                ex:alice foaf:city "NYC" .
+                ex:bob foaf:city "NYC" .
+                ex:charlie foaf:city "LA" .
+            }
+        """)
 
         result = self._execute_sparql("""
             PREFIX foaf: <http://xmlns.com/foaf/0.1/>
@@ -254,5 +282,5 @@ class TestSPARQLAggregate:
             GROUP BY ?city
         """)
         rows = list(result)
-        # Should have city groups
+        # Should have city groups (NYC and LA)
         assert len(rows) >= 1

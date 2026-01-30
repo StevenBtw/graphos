@@ -12,10 +12,10 @@ crate-type = ["cdylib"]
 doc = false
 
 [dependencies]
-grafeo-engine = { path = "../grafeo-engine" }
-grafeo-core = { path = "../grafeo-core" }
-grafeo-common = { path = "../grafeo-common" }
-grafeo-adapters = { path = "../grafeo-adapters" }
+grafeo-engine = { path = "../../grafeo-engine" }
+grafeo-core = { path = "../../grafeo-core" }
+grafeo-common = { path = "../../grafeo-common" }
+grafeo-adapters = { path = "../../grafeo-adapters" }
 
 pyo3 = { workspace = true, features = ["extension-module"] }
 pyo3-async-runtimes = { workspace = true }

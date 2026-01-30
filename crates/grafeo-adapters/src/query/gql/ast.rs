@@ -34,7 +34,18 @@ pub struct QueryStatement {
     pub delete_clauses: Vec<DeleteStatement>,
     /// Required RETURN clause.
     pub return_clause: ReturnClause,
+    /// Optional HAVING clause (filters aggregate results).
+    pub having_clause: Option<HavingClause>,
     /// Source span in the original query.
+    pub span: Option<SourceSpan>,
+}
+
+/// A HAVING clause for filtering aggregate results.
+#[derive(Debug, Clone)]
+pub struct HavingClause {
+    /// The filter expression.
+    pub expression: Expression,
+    /// Source span.
     pub span: Option<SourceSpan>,
 }
 
@@ -464,6 +475,12 @@ pub enum BinaryOp {
     Like,
     /// IN list membership.
     In,
+    /// STARTS WITH prefix matching.
+    StartsWith,
+    /// ENDS WITH suffix matching.
+    EndsWith,
+    /// CONTAINS substring matching.
+    Contains,
 }
 
 /// A unary operator.
