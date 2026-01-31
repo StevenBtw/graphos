@@ -579,11 +579,13 @@ impl LpgStore {
     /// Returns all node IDs in the store.
     ///
     /// This returns a snapshot of current node IDs. The returned vector
-    /// excludes deleted nodes.
+    /// excludes deleted nodes. Results are sorted by NodeId for deterministic
+    /// iteration order.
     #[must_use]
     pub fn node_ids(&self) -> Vec<NodeId> {
         let epoch = self.current_epoch();
-        self.nodes
+        let mut ids: Vec<NodeId> = self
+            .nodes
             .read()
             .iter()
             .filter_map(|(id, chain)| {
@@ -591,7 +593,9 @@ impl LpgStore {
                     .visible_at(epoch)
                     .and_then(|r| if !r.is_deleted() { Some(*id) } else { None })
             })
-            .collect()
+            .collect();
+        ids.sort_unstable();
+        ids
     }
 
     // === Edge Operations ===
@@ -877,13 +881,16 @@ impl LpgStore {
     /// Returns all nodes with a specific label.
     ///
     /// Uses the label index for O(1) lookup per label. Returns a snapshot -
-    /// concurrent modifications won't affect the returned vector.
+    /// concurrent modifications won't affect the returned vector. Results are
+    /// sorted by NodeId for deterministic iteration order.
     pub fn nodes_by_label(&self, label: &str) -> Vec<NodeId> {
         let label_to_id = self.label_to_id.read();
         if let Some(&label_id) = label_to_id.get(label) {
             let index = self.label_index.read();
             if let Some(set) = index.get(label_id as usize) {
-                return set.keys().copied().collect();
+                let mut ids: Vec<NodeId> = set.keys().copied().collect();
+                ids.sort_unstable();
+                return ids;
             }
         }
         Vec::new()

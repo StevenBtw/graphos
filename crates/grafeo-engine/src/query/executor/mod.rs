@@ -126,11 +126,14 @@ impl Executor {
     }
 
     /// Collects all rows from a DataChunk into the result.
+    ///
+    /// Uses `selected_indices()` to correctly handle chunks with selection vectors
+    /// (e.g., after filtering operations).
     fn collect_chunk(&self, chunk: &DataChunk, result: &mut QueryResult) -> Result<usize> {
-        let row_count = chunk.row_count();
         let col_count = chunk.column_count();
+        let mut collected = 0;
 
-        for row_idx in 0..row_count {
+        for row_idx in chunk.selected_indices() {
             let mut row = Vec::with_capacity(col_count);
             for col_idx in 0..col_count {
                 let value = chunk
@@ -140,22 +143,29 @@ impl Executor {
                 row.push(value);
             }
             result.rows.push(row);
+            collected += 1;
         }
 
-        Ok(row_count)
+        Ok(collected)
     }
 
     /// Collects up to `limit` rows from a DataChunk.
+    ///
+    /// Uses `selected_indices()` to correctly handle chunks with selection vectors
+    /// (e.g., after filtering operations).
     fn collect_chunk_limited(
         &self,
         chunk: &DataChunk,
         result: &mut QueryResult,
         limit: usize,
     ) -> Result<usize> {
-        let row_count = chunk.row_count().min(limit);
         let col_count = chunk.column_count();
+        let mut collected = 0;
 
-        for row_idx in 0..row_count {
+        for row_idx in chunk.selected_indices() {
+            if collected >= limit {
+                break;
+            }
             let mut row = Vec::with_capacity(col_count);
             for col_idx in 0..col_count {
                 let value = chunk
@@ -165,9 +175,10 @@ impl Executor {
                 row.push(value);
             }
             result.rows.push(row);
+            collected += 1;
         }
 
-        Ok(row_count)
+        Ok(collected)
     }
 
     /// Executes a physical operator with adaptive cardinality tracking.

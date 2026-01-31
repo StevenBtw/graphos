@@ -505,6 +505,7 @@ impl Session {
         })?;
 
         // Commit RDF store pending operations
+        #[cfg(feature = "rdf")]
         self.rdf_store.commit_tx(tx_id);
 
         self.tx_manager.commit(tx_id).map(|_| ())
@@ -543,6 +544,7 @@ impl Session {
         self.store.discard_uncommitted_versions(tx_id);
 
         // Discard pending operations in the RDF store
+        #[cfg(feature = "rdf")]
         self.rdf_store.rollback_tx(tx_id);
 
         // Mark transaction as aborted in the manager
