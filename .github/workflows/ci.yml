@@ -41,7 +41,9 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Check docs
-        run: cargo doc --no-deps --all-features
+        run: |
+          rm -rf target/doc
+          cargo doc --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -147,7 +149,7 @@ jobs:
         shell: bash
         run: |
           uv pip install --system dist/*.whl
-          uv pip install --system pytest pytest-asyncio networkx solvor
+          uv pip install --system pytest pytest-asyncio networkx numpy scipy solvor
 
       - name: Run Python tests
         run: pytest tests/python/ -v --ignore=tests/python/benchmark_grafeo.py --ignore=tests/python/benchmark_phases.py

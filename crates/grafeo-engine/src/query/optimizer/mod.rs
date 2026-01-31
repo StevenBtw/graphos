@@ -168,10 +168,7 @@ impl Optimizer {
     }
 
     /// Recursively collects required columns.
-    fn collect_required_recursive(
-        op: &LogicalOperator,
-        required: &mut HashSet<RequiredColumn>,
-    ) {
+    fn collect_required_recursive(op: &LogicalOperator, required: &mut HashSet<RequiredColumn>) {
         match op {
             LogicalOperator::Return(ret) => {
                 for item in &ret.items {
