@@ -204,7 +204,7 @@ Full documentation: https://grafeo.dev
 
 ## Source Code
 
-Repository: https://github.com/StevenBtw/grafeo
+Repository: https://github.com/GrafeoDB/grafeo
 
 ## License
 

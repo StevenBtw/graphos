@@ -1,8 +1,8 @@
 # Grafeo
 
-[![CI](https://github.com/StevenBtw/grafeo/actions/workflows/ci.yml/badge.svg)](https://github.com/StevenBtw/grafeo/actions/workflows/ci.yml)
-[![Docs](https://github.com/StevenBtw/grafeo/actions/workflows/docs.yml/badge.svg)](https://github.com/StevenBtw/grafeo/actions/workflows/docs.yml)
-[![codecov](https://codecov.io/gh/StevenBtw/grafeo/graph/badge.svg)](https://codecov.io/gh/StevenBtw/grafeo)
+[![CI](https://github.com/GrafeoDB/grafeo/actions/workflows/ci.yml/badge.svg)](https://github.com/GrafeoDB/grafeo/actions/workflows/ci.yml)
+[![Docs](https://github.com/GrafeoDB/grafeo/actions/workflows/docs.yml/badge.svg)](https://github.com/GrafeoDB/grafeo/actions/workflows/docs.yml)
+[![codecov](https://codecov.io/gh/GrafeoDB/grafeo/graph/badge.svg)](https://codecov.io/gh/GrafeoDB/grafeo)
 [![Crates.io](https://img.shields.io/crates/v/grafeo.svg)](https://crates.io/crates/grafeo)
 [![PyPI](https://img.shields.io/pypi/v/grafeo.svg)](https://pypi.org/project/grafeo/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)

@@ -163,13 +163,12 @@ impl Optimizer {
     /// Collects all variables and properties required by an operator and its ancestors.
     fn collect_required_columns(&self, op: &LogicalOperator) -> HashSet<RequiredColumn> {
         let mut required = HashSet::new();
-        self.collect_required_recursive(op, &mut required);
+        Self::collect_required_recursive(op, &mut required);
         required
     }
 
     /// Recursively collects required columns.
     fn collect_required_recursive(
-        &self,
         op: &LogicalOperator,
         required: &mut HashSet<RequiredColumn>,
     ) {
@@ -178,23 +177,23 @@ impl Optimizer {
                 for item in &ret.items {
                     Self::collect_from_expression(&item.expression, required);
                 }
-                self.collect_required_recursive(&ret.input, required);
+                Self::collect_required_recursive(&ret.input, required);
             }
             LogicalOperator::Project(proj) => {
                 for p in &proj.projections {
                     Self::collect_from_expression(&p.expression, required);
                 }
-                self.collect_required_recursive(&proj.input, required);
+                Self::collect_required_recursive(&proj.input, required);
             }
             LogicalOperator::Filter(filter) => {
                 Self::collect_from_expression(&filter.predicate, required);
-                self.collect_required_recursive(&filter.input, required);
+                Self::collect_required_recursive(&filter.input, required);
             }
             LogicalOperator::Sort(sort) => {
                 for key in &sort.keys {
                     Self::collect_from_expression(&key.expression, required);
                 }
-                self.collect_required_recursive(&sort.input, required);
+                Self::collect_required_recursive(&sort.input, required);
             }
             LogicalOperator::Aggregate(agg) => {
                 for expr in &agg.group_by {
@@ -208,15 +207,15 @@ impl Optimizer {
                 if let Some(ref having) = agg.having {
                     Self::collect_from_expression(having, required);
                 }
-                self.collect_required_recursive(&agg.input, required);
+                Self::collect_required_recursive(&agg.input, required);
             }
             LogicalOperator::Join(join) => {
                 for cond in &join.conditions {
                     Self::collect_from_expression(&cond.left, required);
                     Self::collect_from_expression(&cond.right, required);
                 }
-                self.collect_required_recursive(&join.left, required);
-                self.collect_required_recursive(&join.right, required);
+                Self::collect_required_recursive(&join.left, required);
+                Self::collect_required_recursive(&join.right, required);
             }
             LogicalOperator::Expand(expand) => {
                 // The source and target variables are needed
@@ -225,16 +224,16 @@ impl Optimizer {
                 if let Some(ref edge_var) = expand.edge_variable {
                     required.insert(RequiredColumn::Variable(edge_var.clone()));
                 }
-                self.collect_required_recursive(&expand.input, required);
+                Self::collect_required_recursive(&expand.input, required);
             }
             LogicalOperator::Limit(limit) => {
-                self.collect_required_recursive(&limit.input, required);
+                Self::collect_required_recursive(&limit.input, required);
             }
             LogicalOperator::Skip(skip) => {
-                self.collect_required_recursive(&skip.input, required);
+                Self::collect_required_recursive(&skip.input, required);
             }
             LogicalOperator::Distinct(distinct) => {
-                self.collect_required_recursive(&distinct.input, required);
+                Self::collect_required_recursive(&distinct.input, required);
             }
             LogicalOperator::NodeScan(scan) => {
                 required.insert(RequiredColumn::Variable(scan.variable.clone()));

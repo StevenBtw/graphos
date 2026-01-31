@@ -15,7 +15,7 @@ version = "0.1.4"
 edition = "2024"
 rust-version = "1.91.1"
 license = "Apache-2.0"
-repository = "https://github.com/StevenBtw/grafeo"
+repository = "https://github.com/GrafeoDB/grafeo"
 authors = ["Grafeo Contributors"]
 description = "A pure-Rust, high-performance, embeddable graph database"
 

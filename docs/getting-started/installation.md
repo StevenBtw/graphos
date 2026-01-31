@@ -102,7 +102,7 @@ fn main() -> Result<(), grafeo::Error> {
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/StevenBtw/grafeo.git
+git clone https://github.com/GrafeoDB/grafeo.git
 cd grafeo
 ```
 

@@ -16,12 +16,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/StevenBtw/grafeo.git",
+    "url": "https://github.com/GrafeoDB/grafeo.git",
     "directory": "crates/bindings/wasm"
   },
   "homepage": "https://grafeo.dev",
   "bugs": {
-    "url": "https://github.com/StevenBtw/grafeo/issues"
+    "url": "https://github.com/GrafeoDB/grafeo/issues"
   },
   "main": "grafeo_wasm.js",
   "types": "grafeo_wasm.d.ts",

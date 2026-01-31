@@ -19,7 +19,7 @@ hide:
 ### A pure-Rust, high-performance, embeddable graph database
 
 [Get Started](getting-started/index.md){ .md-button .md-button--primary }
-[View on GitHub](https://github.com/StevenBtw/grafeo){ .md-button }
+[View on GitHub](https://github.com/GrafeoDB/grafeo){ .md-button }
 
 </div>
 
@@ -258,4 +258,4 @@ Choose the query language that fits your needs:
 
 ## License
 
-Grafeo is licensed under the [Apache-2.0 License](https://github.com/StevenBtw/grafeo/blob/main/LICENSE).
+Grafeo is licensed under the [Apache-2.0 License](https://github.com/GrafeoDB/grafeo/blob/main/LICENSE).

@@ -113,7 +113,7 @@ These features are under consideration for future releases:
 
 ## Contributing
 
-Interested in contributing to a specific feature? Check our [GitHub Issues](https://github.com/StevenBtw/grafeo/issues) or join the discussion.
+Interested in contributing to a specific feature? Check our [GitHub Issues](https://github.com/GrafeoDB/grafeo/issues) or join the discussion.
 
 ---
 

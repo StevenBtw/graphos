@@ -13,7 +13,7 @@ Thank you for your interest in contributing to Grafeo! This document provides gu
 ### Setup
 
 ```bash
-git clone https://github.com/StevenBtw/grafeo.git
+git clone https://github.com/GrafeoDB/grafeo.git
 cd grafeo
 cargo build --workspace
 ```
@@ -164,8 +164,8 @@ Use conventional commit format:
 
 ## Project Links
 
-- **Repository**: <https://github.com/StevenBtw/grafeo>
-- **Issues**: <https://github.com/StevenBtw/grafeo/issues>
+- **Repository**: <https://github.com/GrafeoDB/grafeo>
+- **Issues**: <https://github.com/GrafeoDB/grafeo/issues>
 - **Documentation**: <https://grafeo.dev>
 
 ## Code of Conduct
