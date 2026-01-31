@@ -10,7 +10,7 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.91.1-blue)](https://www.rust-lang.org)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org)
 
-A pure-Rust, high-performance, embeddable graph database supporting both **Labeled Property Graph (LPG)** and **Resource Description Framework (RDF)** graph data models.
+Grafeo is a pure-Rust, high-performance graph database that can be embedded as a library or run as a standalone database, with optional in-memory or persistent storage. Grafeo supports both **Labeled Property Graph (LPG)** and **Resource Description Framework (RDF)** graph data models and all major query languages. 
 
 ## Features
 
