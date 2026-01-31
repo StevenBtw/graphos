@@ -13,7 +13,7 @@ Thank you for your interest in contributing to Grafeo! This document provides gu
 ### Setup
 
 ```bash
-git clone https://github.com/StevenBtw/grafeo.git
+git clone https://github.com/GrafeoDB/grafeo.git
 cd grafeo
 cargo build --workspace
 ```
@@ -60,10 +60,10 @@ Query String → Parser → AST → Translator → LogicalPlan → Optimizer →
 | Query Language | LPG | RDF | Notes |
 |----------------|-----|-----|-------|
 | GQL | ✅ | — | Primary language, ISO standard |
-| Cypher | ✅ | — | Feature-gated, openCypher compatible |
-| Gremlin | ✅ | — | Feature-gated, Apache TinkerPop traversal language |
-| GraphQL | ✅ | ✅ | Feature-gated, schema-driven, maps to both models |
-| SPARQL | — | ✅ | Feature-gated, W3C standard for RDF queries |
+| Cypher | ✅ | — | openCypher compatible |
+| Gremlin | ✅ | — | Apache TinkerPop traversal language |
+| GraphQL | ✅ | ✅ | Schema-driven, maps to both models |
+| SPARQL | — | ✅ | W3C standard for RDF queries |
 
 ## Coding Standards
 
@@ -164,8 +164,8 @@ Use conventional commit format:
 
 ## Project Links
 
-- **Repository**: <https://github.com/StevenBtw/grafeo>
-- **Issues**: <https://github.com/StevenBtw/grafeo/issues>
+- **Repository**: <https://github.com/GrafeoDB/grafeo>
+- **Issues**: <https://github.com/GrafeoDB/grafeo/issues>
 - **Documentation**: <https://grafeo.dev>
 
 ## Code of Conduct

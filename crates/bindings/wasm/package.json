@@ -1,6 +1,6 @@
 {
   "name": "@grafeo-db/wasm",
-  "version": "0.0.1",
+  "version": "0.1.4",
   "description": "WebAssembly bindings for Grafeo - a high-performance embeddable graph database",
   "keywords": [
     "graph",
@@ -16,12 +16,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/StevenBtw/grafeo.git",
-    "directory": "crates/grafeo-wasm"
+    "url": "https://github.com/GrafeoDB/grafeo.git",
+    "directory": "crates/bindings/wasm"
   },
   "homepage": "https://grafeo.dev",
   "bugs": {
-    "url": "https://github.com/StevenBtw/grafeo/issues"
+    "url": "https://github.com/GrafeoDB/grafeo/issues"
   },
   "main": "grafeo_wasm.js",
   "types": "grafeo_wasm.d.ts",

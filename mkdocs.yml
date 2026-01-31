@@ -8,8 +8,8 @@ site_description: >-
   Gremlin, GraphQL, SPARQL), ACID transactions, and extensible storage backends.
 
 # Repository
-repo_name: StevenBtw/grafeo
-repo_url: https://github.com/StevenBtw/grafeo
+repo_name: GrafeoDB/grafeo
+repo_url: https://github.com/GrafeoDB/grafeo
 edit_uri: edit/main/docs/
 
 # Copyright
@@ -148,7 +148,7 @@ extra_javascript:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/StevenBtw/grafeo
+      link: https://github.com/GrafeoDB/grafeo
       name: GitHub
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/grafeo/
@@ -322,5 +322,4 @@ nav:
     - Pull Requests: contributing/pull-requests.md
 
   - Roadmap: roadmap.md
-  - Changelog: changelog.md
   - Tags: tags.md

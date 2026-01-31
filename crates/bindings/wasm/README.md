@@ -25,5 +25,5 @@ npm install @grafeo-db/wasm
 ## Links
 
 - [Documentation](https://grafeo.dev)
-- [GitHub](https://github.com/StevenBtw/grafeo)
+- [GitHub](https://github.com/GrafeoDB/grafeo)
 - [Python Package](https://pypi.org/project/grafeo/)
