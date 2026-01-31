@@ -4,7 +4,7 @@ All notable changes to Grafeo, for future reference (and enjoyment).
 
 ## [Unreleased]
 
-## [0.1.4] - 2026-01-30
+## [0.1.4] - 2026-01-31
 
 _Foundation Complete_
 
